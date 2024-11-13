@@ -1,119 +1,71 @@
 import * as vscode from "vscode";
 
-// Fonction appelée lors de l'activation de l'extension
 export function activate(context: vscode.ExtensionContext) {
-  console.log("L’extension 'decorator sample' est activée!");
+  const collection = vscode.languages.createDiagnosticCollection("python");
 
-  let timeout: NodeJS.Timeout | undefined = undefined;
-
-  // Définir un style de décoration pour "pandas"
-  const pandasDecorationType = vscode.window.createTextEditorDecorationType({
-    color: "green",
-    fontWeight: "bold",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "darkgreen",
-  });
-
-  // Définir un style de décoration pour "numpy"
-  const numpyDecorationType = vscode.window.createTextEditorDecorationType({
-    color: "purple",
-    fontWeight: "bold",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "darkpurple",
-  });
-
-  let activeEditor = vscode.window.activeTextEditor;
-
-  // Fonction pour mettre à jour les décorations dans le document actif
-  function updateDecorations() {
-    if (!activeEditor) {
-      return;
-    }
-
-    // Vérifier si le fichier est de type Python ou Jupyter Notebook
-    const fileExtension = activeEditor.document.fileName.split(".").pop();
-    if (fileExtension !== "py" && fileExtension !== "ipynb") {
-      return;
-    }
-
-    const text = activeEditor.document.getText();
-    const pandasMatches: vscode.DecorationOptions[] = [];
-    const numpyMatches: vscode.DecorationOptions[] = [];
-
-    // Rechercher les occurrences de "pandas"
-    const pandasRegex = /\bpandas\b/gi;
-    let match;
-    while ((match = pandasRegex.exec(text)) !== null) {
-      const startPos = activeEditor.document.positionAt(match.index);
-      const endPos = activeEditor.document.positionAt(
-        match.index + match[0].length
-      );
-      const decoration = {
-        range: new vscode.Range(startPos, endPos),
-        hoverMessage: "Librairie **pandas** détectée.",
-      };
-      pandasMatches.push(decoration);
-    }
-
-    // Rechercher les occurrences de "numpy"
-    const numpyRegex = /\bnumpy\b/gi;
-    while ((match = numpyRegex.exec(text)) !== null) {
-      const startPos = activeEditor.document.positionAt(match.index);
-      const endPos = activeEditor.document.positionAt(
-        match.index + match[0].length
-      );
-      const decoration = {
-        range: new vscode.Range(startPos, endPos),
-        hoverMessage: "Librairie **numpy** détectée.",
-      };
-      numpyMatches.push(decoration);
-    }
-
-    // Appliquer les décorations pour "pandas" et "numpy"
-    activeEditor.setDecorations(pandasDecorationType, pandasMatches);
-    activeEditor.setDecorations(numpyDecorationType, numpyMatches);
+  // Mise à jour des diagnostics pour le fichier actif lors de l'activation
+  if (vscode.window.activeTextEditor) {
+    updateDiagnostics(vscode.window.activeTextEditor.document, collection);
   }
 
-  // Fonction pour déclencher les mises à jour des décorations avec un délai
-  function triggerUpdateDecorations(throttle = false) {
-    if (timeout) {
-      clearTimeout(timeout);
-      timeout = undefined;
-    }
-    if (throttle) {
-      timeout = setTimeout(updateDecorations, 500);
-    } else {
-      updateDecorations();
-    }
-  }
-
-  // Appliquer les décorations lors de l'activation de l'éditeur de texte
-  if (activeEditor) {
-    triggerUpdateDecorations();
-  }
-
-  // Mettre à jour les décorations lorsque l'éditeur actif change
-  vscode.window.onDidChangeActiveTextEditor(
-    (editor) => {
-      activeEditor = editor;
+  // Mise à jour des diagnostics lors du changement de l'éditeur actif
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor) {
-        triggerUpdateDecorations();
+        updateDiagnostics(editor.document, collection);
       }
-    },
-    null,
-    context.subscriptions
+    })
   );
 
-  // Mettre à jour les décorations lorsque le document est modifié
-  vscode.workspace.onDidChangeTextDocument(
-    (event) => {
-      if (activeEditor && event.document === activeEditor.document) {
-        triggerUpdateDecorations(true);
+  // Mise à jour des diagnostics à chaque modification du document
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document) {
+        updateDiagnostics(event.document, collection);
       }
-    },
-    null,
-    context.subscriptions
+    })
   );
+}
+
+function updateDiagnostics(
+  document: vscode.TextDocument,
+  collection: vscode.DiagnosticCollection
+): void {
+  // Vérifier que le fichier est bien un fichier Python ou Jupyter Notebook
+  if (document.languageId !== "python" && document.languageId !== "jupyter") {
+    collection.clear();
+    return;
+  }
+
+  const diagnostics: vscode.Diagnostic[] = [];
+  const text = document.getText();
+  const lines = text.split("\n");
+
+  lines.forEach((line, lineNumber) => {
+    if (line.includes("pandas")) {
+      const startPos = new vscode.Position(lineNumber, line.indexOf("pandas"));
+      const endPos = startPos.translate(0, "pandas".length);
+      diagnostics.push(
+        new vscode.Diagnostic(
+          new vscode.Range(startPos, endPos),
+          'Utilisation de "pandas" détectée',
+          vscode.DiagnosticSeverity.Information
+        )
+      );
+    }
+
+    if (line.includes("numpy")) {
+      const startPos = new vscode.Position(lineNumber, line.indexOf("numpy"));
+      const endPos = startPos.translate(0, "numpy".length);
+      diagnostics.push(
+        new vscode.Diagnostic(
+          new vscode.Range(startPos, endPos),
+          'Utilisation de "numpy" détectée',
+          vscode.DiagnosticSeverity.Information
+        )
+      );
+    }
+  });
+
+  collection.set(document.uri, diagnostics);
 }
