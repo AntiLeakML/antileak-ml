@@ -4,18 +4,41 @@
   "description": "Detection of overlapping and pre-processing data leakages that may occur in the Python code of machine learning projects",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.93.1"
+    "vscode": "^1.92.2"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:python",
+    "onLanguage:json"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "antileak-ml.helloWorld",
         "title": "Hello World"
+      }
+    ],
+    "colors": [
+      {
+        "id": "myextension.pandasHighlight",
+        "description": "Couleur de fond pour les mots 'pandas'",
+        "defaults": {
+          "dark": "#00FF0055",
+          "light": "#00FF0055",
+          "highContrast": "#00FF0055"
+        }
+      },
+      {
+        "id": "myextension.numpyHighlight",
+        "description": "Couleur de fond pour les mots 'numpy'",
+        "defaults": {
+          "dark": "#80008055",
+          "light": "#80008055",
+          "highContrast": "#80008055"
+        }
       }
     ]
   },
