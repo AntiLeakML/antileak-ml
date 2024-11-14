@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
+import { execFile } from "child_process";
+import * as path from "path";
 
 export function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("python");
 
-  // Mise à jour des diagnostics pour le fichier actif lors de l'activation
   if (vscode.window.activeTextEditor) {
     updateDiagnostics(vscode.window.activeTextEditor.document, collection);
   }
 
-  // Mise à jour des diagnostics lors du changement de l'éditeur actif
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor) {
@@ -17,7 +17,6 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Mise à jour des diagnostics à chaque modification du document
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.document) {
@@ -27,11 +26,34 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
+function runPythonScript(module: string) {
+  const scriptPath = path.join(__dirname, "../src/python/script.py");
+
+  execFile("python", [scriptPath, module], (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Erreur d'exécution du script Python: ${error.message}`);
+      vscode.window.showErrorMessage(
+        `Erreur d'exécution du script Python: ${error.message}`
+      );
+      return;
+    }
+    if (stderr) {
+      console.error(`Erreur dans le script Python: ${stderr}`);
+      vscode.window.showErrorMessage(`Erreur dans le script Python: ${stderr}`);
+      return;
+    }
+
+    // Affiche uniquement la sortie si elle n'est pas vide
+    const message =
+      stdout.trim() || "Aucun message de sortie du script Python.";
+    vscode.window.showInformationMessage(message);
+  });
+}
+
 function updateDiagnostics(
   document: vscode.TextDocument,
   collection: vscode.DiagnosticCollection
 ): void {
-  // Vérifier que le fichier est bien un fichier Python ou Jupyter Notebook
   if (document.languageId !== "python" && document.languageId !== "jupyter") {
     collection.clear();
     return;
@@ -52,6 +74,7 @@ function updateDiagnostics(
           vscode.DiagnosticSeverity.Information
         )
       );
+      runPythonScript("pandas");
     }
 
     if (line.includes("numpy")) {
@@ -64,6 +87,7 @@ function updateDiagnostics(
           vscode.DiagnosticSeverity.Information
         )
       );
+      runPythonScript("numpy");
     }
   });
 

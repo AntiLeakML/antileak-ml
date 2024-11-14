@@ -15,6 +15,7 @@ print(my_array2.foo)
 my_2darray = np.array([[1, 2, 3], [4, 5, 6]])
 print(pd.DataFrame(my_2darray))
 
+
 # Take a dictionary as input to your DataFrame 
 my_dict = {1: ['1', '3'], 2: ['1', '2'], 3: ['2', '4']}
 print(pd.DataFrame(my_dict))
