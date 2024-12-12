@@ -3,3 +3,7 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+*.ip-fact/
+docker_logs.txt
+*.ip.html
+*.ps1

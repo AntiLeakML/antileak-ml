@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
-import { execFile } from "child_process";
 import * as path from "path";
+import * as fs from "fs";
+import Docker from "dockerode";
 
 export function activate(context: vscode.ExtensionContext) {
-  const collection = vscode.languages.createDiagnosticCollection("python");
+  const collection = vscode.languages.createDiagnosticCollection("docker");
 
   if (vscode.window.activeTextEditor) {
     updateDiagnostics(vscode.window.activeTextEditor.document, collection);
@@ -26,28 +27,133 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-function runPythonScript(module: string) {
-  const scriptPath = path.join(__dirname, "../src/python/script.py");
+async function runDockerContainer(
+  filePath: string,
+  collection: vscode.DiagnosticCollection
+) {
+  const docker = new Docker();
+  const inputDir = path.dirname(filePath);
+  const fileName = path.basename(filePath);
+  const imageName = "nat2194/leakage-analysis:1.0";
+  const logFilePath = path.join(inputDir, "docker_logs.txt"); // Log file path
 
-  execFile("python", [scriptPath, module], (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Erreur d'exécution du script Python: ${error.message}`);
-      vscode.window.showErrorMessage(
-        `Erreur d'exécution du script Python: ${error.message}`
+  try {
+    await docker.pull(imageName);
+
+    const container = await docker.createContainer({
+      Image: imageName,
+      Cmd: [`/app/leakage-analysis/test/${fileName}`, "-o"],
+      Tty: true,
+      HostConfig: {
+        Binds: [`${inputDir}:/app/leakage-analysis/test:rw`],
+      },
+    });
+
+    await container.start();
+
+    // Attach to the container stream
+    const stream = await container.logs({
+      follow: true,
+      stdout: true,
+      stderr: true,
+    });
+
+    const logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+    stream.pipe(logStream);
+
+    const output: Buffer[] = [];
+    stream.on("data", (chunk) => {
+      output.push(chunk); // Capture logs for parsing
+    });
+
+    // Wait for the container to stop
+    await container.wait();
+
+    // Stop and remove the container
+    try {
+      await container.stop();
+    } catch (stopErr) {
+      const stopErrorMessage =
+        stopErr instanceof Error ? stopErr.message : String(stopErr);
+      console.error(`Failed to stop container: ${stopErrorMessage}`);
+      fs.appendFileSync(
+        logFilePath,
+        `Failed to stop container: ${stopErrorMessage}\n`,
+        { encoding: "utf8" }
       );
-      return;
-    }
-    if (stderr) {
-      console.error(`Erreur dans le script Python: ${stderr}`);
-      vscode.window.showErrorMessage(`Erreur dans le script Python: ${stderr}`);
-      return;
     }
 
-    // Affiche uniquement la sortie si elle n'est pas vide
-    const message =
-      stdout.trim() || "Aucun message de sortie du script Python.";
-    vscode.window.showInformationMessage(message);
-  });
+    try {
+      await container.remove();
+    } catch (removeErr) {
+      const removeErrorMessage =
+        removeErr instanceof Error ? removeErr.message : String(removeErr);
+      console.error(`Failed to remove container: ${removeErrorMessage}`);
+      fs.appendFileSync(
+        logFilePath,
+        `Failed to remove container: ${removeErrorMessage}\n`,
+        { encoding: "utf8" }
+      );
+    }
+
+    // Close the log stream
+    logStream.end();
+
+    // Parse logs
+    parseDockerOutput(Buffer.concat(output).toString(), filePath, collection);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`Docker error: ${errorMessage}`);
+    vscode.window.showErrorMessage(`Docker error: ${errorMessage}`);
+
+    // Write error to log file
+    const errorLog = `Docker error: ${errorMessage}\n`;
+    fs.appendFileSync(logFilePath, errorLog, { encoding: "utf8" });
+    console.log(`Error logged to ${logFilePath}`);
+  }
+}
+
+function parseDockerOutput(
+  output: string,
+  filePath: string,
+  collection: vscode.DiagnosticCollection
+) {
+  const diagnostics: vscode.Diagnostic[] = [];
+  const lines = output.split("\n");
+
+  for (const line of lines) {
+    const errorMatch = line.match(/(.+):(\d+):(\d+) - error: (.+) \((.+)\)/);
+    if (errorMatch) {
+      const [, file, lineNumber, column, message, code] = errorMatch;
+      const startPos = new vscode.Position(
+        parseInt(lineNumber) - 1,
+        parseInt(column) - 1
+      );
+      const endPos = startPos.translate(0, message.length);
+      diagnostics.push(
+        new vscode.Diagnostic(
+          new vscode.Range(startPos, endPos),
+          `${message} (${code})`,
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    } else if (line.trim().length > 0) {
+      // Handle uninterpretable lines
+      diagnostics.push(
+        new vscode.Diagnostic(
+          new vscode.Range(
+            new vscode.Position(0, 0),
+            new vscode.Position(0, 1)
+          ),
+          `Uninterpretable output: ${JSON.stringify(line.trim())}`,
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+  }
+
+  const fileUri = vscode.Uri.file(filePath);
+  collection.set(fileUri, diagnostics);
 }
 
 function updateDiagnostics(
@@ -59,37 +165,5 @@ function updateDiagnostics(
     return;
   }
 
-  const diagnostics: vscode.Diagnostic[] = [];
-  const text = document.getText();
-  const lines = text.split("\n");
-
-  lines.forEach((line, lineNumber) => {
-    if (line.includes("pandas")) {
-      const startPos = new vscode.Position(lineNumber, line.indexOf("pandas"));
-      const endPos = startPos.translate(0, "pandas".length);
-      diagnostics.push(
-        new vscode.Diagnostic(
-          new vscode.Range(startPos, endPos),
-          'Utilisation de "pandas" détectée',
-          vscode.DiagnosticSeverity.Information
-        )
-      );
-      runPythonScript("pandas");
-    }
-
-    if (line.includes("numpy")) {
-      const startPos = new vscode.Position(lineNumber, line.indexOf("numpy"));
-      const endPos = startPos.translate(0, "numpy".length);
-      diagnostics.push(
-        new vscode.Diagnostic(
-          new vscode.Range(startPos, endPos),
-          'Utilisation de "numpy" détectée',
-          vscode.DiagnosticSeverity.Information
-        )
-      );
-      runPythonScript("numpy");
-    }
-  });
-
-  collection.set(document.uri, diagnostics);
+  runDockerContainer(document.uri.fsPath, collection);
 }
