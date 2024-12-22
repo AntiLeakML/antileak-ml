@@ -1,29 +1,27 @@
-import pandas as pd 
-import numpy as np
+# oversampling datasets , new rows are synthesized based on existing rows
+X_new , y_new = SMOTE () . fit_resample (X , y )
 
-# A structured array
-my_array = np.ones(3, dtype=([('foo', int), ('bar', float)]))
-# Print the structured array
-print(my_array['foo'])
+# splits after over - sampling no longer produce independent train / test data
+X_train , X_test , y_train , y_test = train_test_split (
+X_new , y_new , test_size =0.2 , random_state =42)
 
-# A record array
-my_array2 = my_array.view(np.recarray)
-# Print the record array
-print(my_array2.foo)
+rf = RandomForestClassifier () . fit ( X_train , y_train )
+rf . predict ( X_test )
 
-# Take a 2D array as input to your DataFrame 
-my_2darray = np.array([[1, 2, 3], [4, 5, 6]])
-print(pd.DataFrame(my_2darray))
+# select the best model with repeated evaluation
+results = []
+for clf , name in ( ( DecisionTreeClassifier () , " Decision Tree ") , ( Perceptron () , " Perceptron ") ) :
+    clf . fit ( X_train , y_train )
+    pred = clf . predict ( X_test )
+    score = metrics . accuracy_score ( y_test , pred )
+    results . append ( score , name )
 
+# unknown words in test data leak into training data
+wordsVectorizer = CountVectorizer () . fit ( text )
+wordsVector = wordsVectorizer . transform ( text )
+invTransformer = TfidfTransformer () . fit ( wordsVector )
+invFreqOfWords = invTransformer . transform ( wordsVector )
+X = pd . DataFrame ( invFreqOfWords . toarray () )
 
-# Take a dictionary as input to your DataFrame 
-my_dict = {1: ['1', '3'], 2: ['1', '2'], 3: ['2', '4']}
-print(pd.DataFrame(my_dict))
-
-# Take a DataFrame as input to your DataFrame 
-my_df = pd.DataFrame(data=[4,5,6,7], index=range(0,4), columns=['A'])
-print(pd.DataFrame(my_df))
-
-# Take a Series as input to your DataFrame
-my_series = pd.Series({"Belgium":"Brussels", "India":"New Delhi", "United Kingdom":"London", "United States":"Washington"})
-print(pd.DataFrame(my_series))
+train , test , spamLabelTrain , spamLabelTest = train_test_split (X , y , test_size = 0.5)
+predictAndReport ( train = train , test = test )

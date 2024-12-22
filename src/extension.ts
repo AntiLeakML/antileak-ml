@@ -123,7 +123,9 @@ function parseDockerOutput(
 
   for (const line of lines) {
     const errorMatch = line.match(/(.+):(\d+):(\d+) - error: (.+) \((.+)\)/);
+
     if (errorMatch) {
+      // Cas d'erreur classique
       const [, file, lineNumber, column, message, code] = errorMatch;
       const startPos = new vscode.Position(
         parseInt(lineNumber) - 1,
@@ -137,16 +139,28 @@ function parseDockerOutput(
           vscode.DiagnosticSeverity.Error
         )
       );
-    } else if (line.trim().length > 0) {
-      // Handle uninterpretable lines
+    } else if (line.startsWith("Success!")) {
+      // Cas spécifique pour les lignes "Success!"
       diagnostics.push(
         new vscode.Diagnostic(
           new vscode.Range(
             new vscode.Position(0, 0),
-            new vscode.Position(0, 1)
+            new vscode.Position(0, line.length)
           ),
-          `Uninterpretable output: ${JSON.stringify(line.trim())}`,
-          vscode.DiagnosticSeverity.Warning
+          `Docker execution success: ${line.trim()}`,
+          vscode.DiagnosticSeverity.Information
+        )
+      );
+    } else if (line.startsWith("Failed to")) {
+      // Cas spécifique pour les lignes "Failed"
+      diagnostics.push(
+        new vscode.Diagnostic(
+          new vscode.Range(
+            new vscode.Position(0, 0),
+            new vscode.Position(0, line.length)
+          ),
+          `Docker execution failure: ${line.trim()}`,
+          vscode.DiagnosticSeverity.Error
         )
       );
     }
