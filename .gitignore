@@ -4,6 +4,10 @@ node_modules
 .vscode-test/
 *.vsix
 *.ip-fact/
+*-fact/
 docker_logs.txt
 *.ip.html
+*.html
+*.ir.py
+*.py.json
 *.ps1
