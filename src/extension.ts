@@ -4,6 +4,9 @@ import * as fs from "fs";
 import Docker from "dockerode";
 import * as cheerio from "cheerio";
 
+// Déclaration globale de decorationCollection
+let decorations: vscode.TextEditorDecorationType[] = [];
+
 export function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
 
@@ -57,24 +60,20 @@ export function activate(context: vscode.ExtensionContext) {
 
   if (vscode.window.activeTextEditor) {
     // Appel initial pour mettre à jour les diagnostics lorsque l'éditeur est actif
-    updateDiagnostics(
-      vscode.window.activeTextEditor.document,
-      collection,
-      context
-    );
+    updateDiagnostics(vscode.window.activeTextEditor.document, collection);
   }
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
-      updateDiagnostics(document, collection, context);
+      vscode.commands.executeCommand("workbench.action.reloadWindow");
+      updateDiagnostics(document, collection);
     })
   );
 }
 
 async function runDockerContainer(
   filePath: string,
-  collection: vscode.DiagnosticCollection,
-  context: vscode.ExtensionContext
+  collection: vscode.DiagnosticCollection
 ) {
   const docker = new Docker();
   const inputDir = path.dirname(filePath);
@@ -160,6 +159,9 @@ async function runDockerContainer(
     logStream.end();
 
     parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
+
+    // Appeler cleanup pour supprimer le fichier HTML
+    cleanup(htmlOutputPath);
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error(`Error: ${errorMessage}`);
@@ -181,9 +183,8 @@ function parseHtmlForDiagnostics(
   const $ = cheerio.load(htmlContent);
 
   const diagnostics: vscode.Diagnostic[] = [];
-  const decorations: vscode.TextEditorDecorationType[] = [];
 
-  // Appelle parseSumTable pour analyser la table .sum et ajouter des diagnostics
+  // Appelle parseSumTable pour analyser la table .sum
   parseSumTable($, diagnostics);
   // Recherche la table de classe "sum"
   const sumTable = $("table.sum").html();
@@ -224,19 +225,12 @@ function parseHtmlForDiagnostics(
         const backgroundColor = $(element).css("background-color");
 
         // Appelle les fonctions de détection
-        detectLeakage(
-          buttonText,
-          backgroundColor,
-          range,
-          decorations,
-          diagnostics
-        );
+        detectLeakage(buttonText, backgroundColor, range, diagnostics);
         highlightTrainTestSites(
           buttonText,
           onclickValue,
           lineNumber,
           range,
-          decorations,
           diagnostics
         );
       }
@@ -252,30 +246,45 @@ function detectLeakage(
   buttonText: string,
   backgroundColor: string | undefined,
   range: vscode.Range,
-  decorations: vscode.TextEditorDecorationType[],
   diagnostics: vscode.Diagnostic[]
 ) {
   if (backgroundColor === "red") {
     const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
     const diagnosticMessage = buttonText;
 
-    // Crée une décoration pour l'affichage de l'erreur
-    const decorationType = vscode.window.createTextEditorDecorationType({
-      after: {
-        contentText: buttonText, // Texte du bouton
-        backgroundColor: "red", // Couleur de fond rouge
-        color: "white", // Couleur du texte
-        margin: "0 10px 0 10px", // Espacement
-      },
-      borderRadius: "5px", // Arrondi des coins
-      cursor: "pointer", // Apparence du curseur
-    });
+    // Vérifie si une décoration avec le même texte existe déjà
+    const existingDecoration = decorations.find(
+      (decoration: vscode.TextEditorDecorationType) => {
+        const options = decoration as vscode.DecorationRenderOptions;
+        return options.after?.contentText === buttonText;
+      }
+    );
 
-    // Ajoute la décoration
-    const editor = vscode.window.activeTextEditor;
-    if (editor) {
-      editor.setDecorations(decorationType, [range]);
-      decorations.push(decorationType);
+    if (!existingDecoration) {
+      // Crée une décoration pour l'affichage de l'erreur
+      const decorationType = vscode.window.createTextEditorDecorationType({
+        after: {
+          contentText: buttonText, // Texte du bouton
+          backgroundColor: "red", // Couleur de fond rouge
+          color: "white", // Couleur du texte
+          margin: "0 10px 0 10px", // Espacement
+        },
+        borderRadius: "5px", // Arrondi des coins
+        cursor: "pointer", // Apparence du curseur
+      });
+      // Ajoute la décoration
+      const editor = vscode.window.activeTextEditor;
+      if (editor) {
+        editor.setDecorations(decorationType, [range]);
+        decorations.push(decorationType);
+      }
+    } else {
+      // Ajoute la décoration
+      const editor = vscode.window.activeTextEditor;
+      if (editor) {
+        editor.setDecorations(existingDecoration, [range]);
+        decorations.push(existingDecoration);
+      }
     }
 
     // Ajoute le diagnostic
@@ -293,7 +302,6 @@ function highlightTrainTestSites(
   onclickValue: string | undefined,
   lineNumber: number,
   range: vscode.Range,
-  decorations: vscode.TextEditorDecorationType[],
   diagnostics: vscode.Diagnostic[]
 ) {
   vscode.window.showErrorMessage("test2");
@@ -411,18 +419,101 @@ function showHtmlInWebView(htmlContent: string) {
 
 function updateDiagnostics(
   document: vscode.TextDocument,
-  collection: vscode.DiagnosticCollection,
-  context: vscode.ExtensionContext
+  collection: vscode.DiagnosticCollection
 ): void {
   if (document.languageId !== "python" && document.languageId !== "jupyter") {
-    collection.clear();
     return;
   }
 
-  runDockerContainer(document.uri.fsPath, collection, context);
+  collection.clear();
+  runDockerContainer(document.uri.fsPath, collection);
 }
 
 // Fonction pour créer un type de décoration basé sur le thème actuel
 function isThemeLight(): boolean {
   return vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+}
+
+function cleanup(filePath: string) {
+  const dirPath = path.dirname(filePath);
+
+  try {
+    // Supprimer le fichier HTML
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`File ${filePath} has been deleted.`);
+    }
+
+    // Supprimer les dossiers finissant par -fact
+    const factDirs = fs
+      .readdirSync(dirPath)
+      .filter(
+        (item) =>
+          item.endsWith("-fact") &&
+          fs.statSync(path.join(dirPath, item)).isDirectory()
+      );
+    for (const dir of factDirs) {
+      deleteFolderRecursive(path.join(dirPath, dir));
+    }
+
+    // Supprimer les dossiers finissant par ip-fact
+    const ipFactDirs = fs
+      .readdirSync(dirPath)
+      .filter(
+        (item) =>
+          item.endsWith("ip-fact") &&
+          fs.statSync(path.join(dirPath, item)).isDirectory()
+      );
+    for (const dir of ipFactDirs) {
+      deleteFolderRecursive(path.join(dirPath, dir));
+    }
+
+    // Supprimer les fichiers finissant par .ir.py
+    const irPyFiles = fs
+      .readdirSync(dirPath)
+      .filter((item) => item.endsWith(".ir.py"));
+    for (const file of irPyFiles) {
+      fs.unlinkSync(path.join(dirPath, file));
+      console.log(`File ${file} has been deleted.`);
+    }
+
+    // Supprimer les fichiers finissant par .py.json
+    const pyJsonFiles = fs
+      .readdirSync(dirPath)
+      .filter((item) => item.endsWith(".py.json"));
+    for (const file of pyJsonFiles) {
+      fs.unlinkSync(path.join(dirPath, file));
+      console.log(`File ${file} has been deleted.`);
+    }
+
+    // Supprimer les fichiers finissant par .ipynb.json
+    const ipynbJsonFiles = fs
+      .readdirSync(dirPath)
+      .filter((item) => item.endsWith(".ipynb.json"));
+    for (const file of ipynbJsonFiles) {
+      fs.unlinkSync(path.join(dirPath, file));
+      console.log(`File ${file} has been deleted.`);
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to clean up files or directories: ${errorMessage}`);
+  }
+}
+
+// Fonction récursive pour supprimer un dossier et son contenu
+function deleteFolderRecursive(folderPath: string) {
+  if (fs.existsSync(folderPath)) {
+    fs.readdirSync(folderPath).forEach((file) => {
+      const curPath = path.join(folderPath, file);
+      if (fs.lstatSync(curPath).isDirectory()) {
+        // Récursement pour les sous-dossiers
+        deleteFolderRecursive(curPath);
+      } else {
+        // Supprimer les fichiers
+        fs.unlinkSync(curPath);
+      }
+    });
+    fs.rmdirSync(folderPath);
+    console.log(`Directory ${folderPath} has been deleted.`);
+  }
 }
