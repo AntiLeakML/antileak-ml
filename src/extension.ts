@@ -60,13 +60,31 @@ export function activate(context: vscode.ExtensionContext) {
 
   if (vscode.window.activeTextEditor) {
     // Appel initial pour mettre à jour les diagnostics lorsque l'éditeur est actif
-    updateDiagnostics(vscode.window.activeTextEditor.document, collection);
+    updateDiagnostics(
+      vscode.window.activeTextEditor.document,
+      null,
+      collection
+    );
+  } else if (vscode.window.activeNotebookEditor) {
+    // Appel initial pour mettre à jour les diagnostics lorsque l'éditeur est actif
+    updateDiagnostics(
+      null,
+      vscode.window.activeNotebookEditor.notebook,
+      collection
+    );
   }
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
       vscode.commands.executeCommand("workbench.action.reloadWindow");
-      updateDiagnostics(document, collection);
+      updateDiagnostics(document, null, collection);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveNotebookDocument((notebook) => {
+      vscode.commands.executeCommand("workbench.action.reloadWindow");
+      updateDiagnostics(null, notebook, collection);
     })
   );
 }
@@ -95,6 +113,8 @@ async function runDockerContainer(
     inputDir,
     path.basename(filePath, extension) + newExtension
   );
+
+  vscode.window.showInformationMessage(`Running analysis on ${fileName}`);
 
   try {
     await docker.pull(imageName);
@@ -418,15 +438,19 @@ function showHtmlInWebView(htmlContent: string) {
 }
 
 function updateDiagnostics(
-  document: vscode.TextDocument,
+  document: vscode.TextDocument | null,
+  notebook: vscode.NotebookDocument | null,
   collection: vscode.DiagnosticCollection
 ): void {
-  if (document.languageId !== "python" && document.languageId !== "jupyter") {
+  if (document && document.languageId === "python") {
+    collection.clear();
+    runDockerContainer(document.uri.fsPath, collection);
+  } else if (notebook && notebook.notebookType === "jupyter-notebook") {
+    collection.clear();
+    runDockerContainer(notebook.uri.fsPath, collection);
+  } else {
     return;
   }
-
-  collection.clear();
-  runDockerContainer(document.uri.fsPath, collection);
 }
 
 // Fonction pour créer un type de décoration basé sur le thème actuel

@@ -4,7 +4,6 @@ X_new , y_new = SMOTE () . fit_resample (X , y )
 # splits after over - sampling no longer produce independent train / test data
 X_train , X_test , y_train , y_test = train_test_split (
 X_new , y_new , test_size =0.2 , random_state =42)
-
 rf = RandomForestClassifier () . fit ( X_train , y_train )
 rf . predict ( X_test )
 
