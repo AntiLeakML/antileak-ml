@@ -125,6 +125,8 @@ async function runDockerContainer(
       Tty: true,
       HostConfig: {
         Binds: [`${inputDir}:/app/leakage-analysis/test:rw`],
+        Memory: 8 * 1024 * 1024 * 1024, // 4 GB of memory
+        NanoCpus: 5000000000, // 2.5 CPUs
       },
     });
 
@@ -222,9 +224,6 @@ function parseHtmlForDiagnostics(
       </html>
     `;
 
-    // Afficher la table dans un WebView
-    showHtmlInWebView(fullHtmlContent);
-
     // Parcours de tous les boutons
     $("button").each((index, element) => {
       const buttonText = $(element).text().trim(); // Texte du bouton
@@ -259,6 +258,9 @@ function parseHtmlForDiagnostics(
     // Ajoute les diagnostics à la collection
     const fileUri = vscode.Uri.file(filePath);
     collection.set(fileUri, diagnostics);
+
+    // Afficher la table dans un WebView
+    showHtmlInWebView(fullHtmlContent);
   }
 }
 
