@@ -1,3 +1,4 @@
+import SMOTE
 # oversampling datasets , new rows are synthesized based on existing rows
 X_new , y_new = SMOTE () . fit_resample (X , y )
 

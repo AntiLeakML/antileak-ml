@@ -4,8 +4,12 @@ import * as fs from "fs";
 import Docker from "dockerode";
 import * as cheerio from "cheerio";
 
+import { sendDiscordNotification } from "./discordNotif";
+
 // Déclaration globale de decorationCollection
 let decorations: vscode.TextEditorDecorationType[] = [];
+const webhookUrl =
+  "https://discord.com/api/webhooks/1330660966832275581/fqwFfSGP4Aet8Axf25UvsinOWwWP2WygCu7Tf0wetbr9qqv4KDUVLv8s4wyKcZ9hEGLa";
 
 export function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
@@ -125,6 +129,8 @@ async function runDockerContainer(
       Tty: true,
       HostConfig: {
         Binds: [`${inputDir}:/app/leakage-analysis/test:rw`],
+        Memory: 8 * 1024 * 1024 * 1024, // 8 GB of memory
+        NanoCpus: 5000000000, // 5 CPUs
       },
     });
 
@@ -155,6 +161,8 @@ async function runDockerContainer(
       const stopErrorMessage =
         stopErr instanceof Error ? stopErr.message : String(stopErr);
       console.error(`Failed to stop container: ${stopErrorMessage}`);
+      // Envoyer une notification Discord
+      await sendDiscordNotification(webhookUrl, stopErrorMessage);
       fs.appendFileSync(
         logFilePath,
         `Failed to stop container: ${stopErrorMessage}\n`,
@@ -163,10 +171,12 @@ async function runDockerContainer(
     }
 
     try {
-      await container.remove();
+      //await container.remove();
     } catch (removeErr) {
       const removeErrorMessage =
         removeErr instanceof Error ? removeErr.message : String(removeErr);
+      // Envoyer une notification Discord
+      await sendDiscordNotification(webhookUrl, removeErrorMessage);
       console.error(`Failed to remove container: ${removeErrorMessage}`);
       fs.appendFileSync(
         logFilePath,
@@ -179,6 +189,10 @@ async function runDockerContainer(
     logStream.end();
 
     parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
+
+    // Envoyer une notification Discord
+    const message = `Docker container has finished processing the file: ${fileName}`;
+    await sendDiscordNotification(webhookUrl, message);
 
     // Appeler cleanup pour supprimer le fichier HTML
     cleanup(htmlOutputPath);
@@ -273,12 +287,14 @@ function detectLeakage(
     const diagnosticMessage = buttonText;
 
     // Vérifie si une décoration avec le même texte existe déjà
-    const existingDecoration = decorations.find(
+    /*const existingDecoration = decorations.find(
       (decoration: vscode.TextEditorDecorationType) => {
         const options = decoration as vscode.DecorationRenderOptions;
         return options.after?.contentText === buttonText;
       }
-    );
+    );*/
+
+    const existingDecoration = false;
 
     if (!existingDecoration) {
       // Crée une décoration pour l'affichage de l'erreur
@@ -324,8 +340,6 @@ function highlightTrainTestSites(
   range: vscode.Range,
   diagnostics: vscode.Diagnostic[]
 ) {
-  vscode.window.showErrorMessage("test2");
-
   if (buttonText === "train" || buttonText === "test") {
     // Ajoute un diagnostic informatif
     const diagnosticMessage = `${buttonText} data`;
@@ -427,7 +441,7 @@ function showHtmlInWebView(htmlContent: string) {
   const panel = vscode.window.createWebviewPanel(
     "LeakageReport", // Identifiant unique pour le WebView
     "Leakage Report", // Titre du panneau
-    vscode.ViewColumn.Two, // Position du WebView (dans la deuxième colonne de l'éditeur)
+    vscode.ViewColumn.One, // Position du WebView (dans la première colonne de l'éditeur)
     {
       enableScripts: true, // Permet l'utilisation de scripts dans le WebView (facultatif)
     }

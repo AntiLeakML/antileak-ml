@@ -69,6 +69,8 @@
   },
   "dependencies": {
     "cheerio": "^1.0.0",
-    "dockerode": "^4.0.2"
+    "dockerode": "^4.0.2",
+    "node-fetch": "^3.3.2",
+    "ts-node": "^10.9.2"
   }
 }
