@@ -25,6 +25,10 @@
         "title": "AntiLeak: Analyze Jupyter Notebook"
       },
       {
+        "command": "antileak-ml.parseNotebook",
+        "title": "AntiLeak: Parse Notebook"
+      },
+      {
         "command": "antileak-ml.highlightLine",
         "title": "AntiLeak: Highlight Lines"
       }

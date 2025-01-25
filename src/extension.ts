@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { handlePythonFile } from "./pythonHandler";
 import { handleJupyterFile } from "./jupyterHandler";
+import * as jupyterNotebookParser from "./components/jupyterNotebookParser";
 import { globals } from "./globals";
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -12,6 +13,12 @@ export async function activate(context: vscode.ExtensionContext) {
     () => {
       handlePythonFile(context);
     }
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("antileak-ml.parseNotebook", () => {
+      jupyterNotebookParser.mapNotebookHTML();
+    })
   );
 
   const runAnalysisNotebook = vscode.commands.registerCommand(

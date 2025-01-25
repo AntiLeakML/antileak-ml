@@ -4,6 +4,17 @@ import * as fs from "fs";
 import Docker from "dockerode";
 import * as cheerio from "cheerio";
 import { globals } from "./globals";
+import * as jupyterNotebookParser from "./components/jupyterNotebookParser";
+
+// Create a cell mapping data structure
+const cellMapping: {
+  [key: string]: {
+    startLine: number;
+    endLine: number;
+    htmlStartLine: number;
+    htmlEndLine: number;
+  };
+} = {};
 
 export async function handleJupyterFile(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
@@ -206,6 +217,8 @@ async function runDockerContainer(
 
     parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
 
+    mapNotebookCells();
+
     // Appeler cleanup pour supprimer le fichier HTML
     cleanup(htmlOutputPath);
   } catch (err) {
@@ -266,6 +279,8 @@ function parseHtmlForDiagnostics(
 
         // Vérifie la couleur de fond du bouton
         const backgroundColor = $(element).css("background-color");
+
+        jupyterNotebookParser.mapNotebookHTML();
 
         // Appelle les fonctions de détection
         detectLeakage(buttonText, backgroundColor, range, diagnostics);
@@ -562,4 +577,44 @@ function deleteFolderRecursive(folderPath: string) {
     fs.rmdirSync(folderPath);
     console.log(`Directory ${folderPath} has been deleted.`);
   }
+}
+
+function mapNotebookCells() {
+  // Populate the cell mapping data structure
+  if (vscode.window.activeNotebookEditor) {
+    const notebook = vscode.window.activeNotebookEditor.notebook;
+    const cells = notebook.getCells();
+
+    cells.forEach((cell, index) => {
+      const cellId = cell.metadata.id;
+      const cellContent = cell.document.getText();
+      const startLine = cell.document.lineCount;
+      const endLine = startLine + cell.document.lineCount - 1;
+
+      // Calculate the corresponding HTML line numbers
+      const htmlStartLine = calculateHtmlLineOffset(cellContent, index);
+      const htmlEndLine = htmlStartLine + cell.document.lineCount - 1;
+
+      cellMapping[cellId] = {
+        startLine,
+        endLine,
+        htmlStartLine,
+        htmlEndLine,
+      };
+    });
+  }
+}
+
+function calculateHtmlLineOffset(cellContent: string, index: number): number {
+  // Implement a content-based hashing or text similarity metric to calculate the line offset
+  // For simplicity, we will use a simple string matching algorithm
+  const htmlContent = fs.readFileSync("path/to/html/file", "utf8");
+  const lines = htmlContent.split("\n");
+  let offset = 0;
+
+  for (let i = 0; i < index; i++) {
+    offset += lines[i].split("\n").length;
+  }
+
+  return offset;
 }
