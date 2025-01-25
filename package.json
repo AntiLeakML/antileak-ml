@@ -17,19 +17,28 @@
   "contributes": {
     "commands": [
       {
-        "command": "antileak-ml.detectPythonOrNotebook",
-        "title": "Detect File Type"
+        "command": "antileak-ml.runAnalysisPython",
+        "title": "AntiLeak: Analyze Python File"
+      },
+      {
+        "command": "antileak-ml.runAnalysisNotebook",
+        "title": "AntiLeak: Analyze Jupyter Notebook"
       },
       {
         "command": "antileak-ml.highlightLine",
-        "title": "Highlight Line"
+        "title": "AntiLeak: Highlight Lines"
       }
     ],
     "keybindings": [
       {
-        "command": "antileak-ml.detectPythonOrNotebook",
+        "command": "antileak-ml.runAnalysisPython",
         "key": "ctrl+alt+a",
-        "when": "resourceExtname =~ /\\.(py|ipynb)$/"
+        "when": "resourceExtname =~ /\\.(py)$/"
+      },
+      {
+        "command": "antileak-ml.runAnalysisNotebook",
+        "key": "ctrl+alt+a",
+        "when": "resourceExtname =~ /\\.(ipynb)$/"
       }
     ]
   },

@@ -1,49 +1,74 @@
 import * as vscode from "vscode";
-import * as path from "path";
-import * as fs from "fs";
-import Docker from "dockerode";
-import * as cheerio from "cheerio";
 import { handlePythonFile } from "./pythonHandler";
 import { handleJupyterFile } from "./jupyterHandler";
 import { globals } from "./globals";
 
 export async function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
-  const command = vscode.commands.registerCommand(
-    "antileak-ml.detectPythonOrNotebook",
+
+  // Déclarer les commandes
+  const runAnalysisPython = vscode.commands.registerCommand(
+    "antileak-ml.runAnalysisPython",
     () => {
-      // Get the active text editor
-      const editor = vscode.window.activeTextEditor;
-
-      if (!editor) {
-        vscode.window.showInformationMessage("No active editor found.");
-        return;
-      }
-
-      // Get the file name and its extension
-      const fileName = editor.document.fileName;
-      const fileExtension = fileName.split(".").pop()?.toLowerCase();
-
-      const notebook = vscode.window.activeNotebookEditor?.notebook;
-
-      // Check if the file is a Python file or a Jupyter Notebook
-      if (fileExtension === "py") {
-        vscode.window.showInformationMessage(
-          "The opened file is a Python document."
-        );
-        handlePythonFile(context);
-      } else if (fileExtension === "ipynb") {
-        vscode.window.showInformationMessage(
-          "The opened file is a Jupyter Notebook."
-        );
-        handleJupyterFile(context);
-      } else {
-        vscode.window.showInformationMessage(
-          "The opened file is neither a Python document nor a Jupyter Notebook."
-        );
-      }
+      handlePythonFile(context);
     }
   );
 
-  context.subscriptions.push(command);
+  const runAnalysisNotebook = vscode.commands.registerCommand(
+    "antileak-ml.runAnalysisNotebook",
+    () => {
+      handleJupyterFile(context);
+    }
+  );
+
+  // Ajouter les commandes au contexte de l'extension
+  context.subscriptions.push(runAnalysisPython, runAnalysisNotebook);
+
+  // Créer le bouton dans la barre d'état
+  const statusBarButton = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    100
+  );
+  statusBarButton.text = "$(file-code) Run Analysis"; // Texte et icône par défaut
+  statusBarButton.tooltip = "Run analysis based on the current file type";
+  context.subscriptions.push(statusBarButton);
+
+  // Fonction pour mettre à jour la commande et la visibilité du bouton
+  function updateStatusBar() {
+    const activeEditor = vscode.window.activeTextEditor;
+
+    if (activeEditor) {
+      const fileExtension = activeEditor.document.fileName.split(".").pop();
+
+      if (fileExtension === "py") {
+        statusBarButton.command = "antileak-ml.runAnalysisPython";
+        statusBarButton.text = "$(python) Run Python Analysis";
+        statusBarButton.tooltip =
+          "Analyze your Python script for data leakages";
+        statusBarButton.show();
+      } else if (fileExtension === "ipynb") {
+        statusBarButton.command = "antileak-ml.runAnalysisNotebook";
+        statusBarButton.text = "$(notebook) Run Notebook Analysis";
+        statusBarButton.tooltip =
+          "Analyze your Jupyter Notebook for data leakages";
+        statusBarButton.show();
+      } else {
+        statusBarButton.hide(); // Cacher si le fichier n'est ni .py ni .ipynb
+      }
+    } else {
+      statusBarButton.hide(); // Cacher si aucun éditeur n'est actif
+    }
+  }
+
+  // Mettre à jour l'état du bouton à l'activation
+  updateStatusBar();
+
+  // Mettre à jour le bouton lorsque l'utilisateur change d'éditeur
+  vscode.window.onDidChangeActiveTextEditor(
+    updateStatusBar,
+    null,
+    context.subscriptions
+  );
 }
+
+export function deactivate() {}
