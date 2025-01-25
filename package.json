@@ -17,12 +17,20 @@
   "contributes": {
     "commands": [
       {
-        "command": "antileak-ml.helloWorld",
-        "title": "Hello World"
+        "command": "antileak-ml.loadDecorations",
+        "title": "Load AntiLeak Decorations"
+      },
+      {
+        "command": "antileak-ml.storeNotebookDecorations",
+        "title": "Store AntiLeak Decorations"
       },
       {
         "command": "antileak-ml.highlightLine",
         "title": "Highlight Line"
+      },
+      {
+        "command": "antileak-ml.detectPythonOrNotebook",
+        "title": "Detect File Type"
       }
     ],
     "colors": [

@@ -4,13 +4,362 @@ import * as fs from "fs";
 import Docker from "dockerode";
 import * as cheerio from "cheerio";
 
-// Déclaration globale de decorationCollection
-let decorations: vscode.TextEditorDecorationType[] = [];
+// Map globale pour gérer les décorations par fichier
+const notebookDecorationStore: Map<
+  string,
+  {
+    ranges: vscode.Range[];
+    backgroundColor: string;
+  }[]
+> = new Map();
 
 export async function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
 
   let highlightedLines: Set<string> = new Set(); // Pour suivre les lignes surlignées
+
+  const command = vscode.commands.registerCommand(
+    "antileak-ml.detectPythonOrNotebook",
+    () => {
+      // Get the active text editor
+      const editor = vscode.window.activeTextEditor;
+
+      if (!editor) {
+        vscode.window.showInformationMessage("No active editor found.");
+        return;
+      }
+
+      // Get the file name and its extension
+      const fileName = editor.document.fileName;
+      const fileExtension = fileName.split(".").pop()?.toLowerCase();
+
+      const notebook = vscode.window.activeNotebookEditor?.notebook;
+      vscode.window.showInformationMessage(`${notebook?.cellCount}`);
+
+      // Check if the file is a Python file or a Jupyter Notebook
+      if (fileExtension === "py") {
+        vscode.window.showInformationMessage(
+          "The opened file is a Python document."
+        );
+      } else if (fileExtension === "ipynb") {
+        vscode.window.showInformationMessage(
+          "The opened file is a Jupyter Notebook."
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          "The opened file is neither a Python document nor a Jupyter Notebook."
+        );
+      }
+    }
+  );
+
+  // Add to the context's subscriptions
+  context.subscriptions.push(command);
+
+  // Command to store decorations
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "antileak-ml.storeNotebookDecorations",
+      (ranges: vscode.Range[], backgroundColor: string) => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+          return;
+        }
+
+        // Find the containing notebook
+        const containingNotebook = vscode.workspace.notebookDocuments.find(
+          (nb) => {
+            for (let i = 0; i < nb.cellCount; i++) {
+              const cell = nb.cellAt(i);
+              if (
+                cell.document.uri.toString() === editor.document.uri.toString()
+              ) {
+                return true;
+              }
+            }
+            return false;
+          }
+        );
+
+        if (containingNotebook) {
+          // Safely get existing decorations or initialize an empty array
+          const existingDecorations =
+            notebookDecorationStore.get(containingNotebook.uri.toString()) ??
+            [];
+
+          // Add new decorations
+          const updatedDecorations = [
+            ...existingDecorations,
+            { ranges, backgroundColor },
+          ];
+
+          // Store updated decorations
+          notebookDecorationStore.set(
+            containingNotebook.uri.toString(),
+            updatedDecorations
+          );
+
+          // Create and apply decoration
+          const decorationType = vscode.window.createTextEditorDecorationType({
+            backgroundColor: backgroundColor,
+          });
+
+          editor.setDecorations(decorationType, ranges);
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("antileak-ml.loadDecorations", () => {
+      const activeEditor = vscode.window.activeTextEditor;
+      const activeNotebookEditor = vscode.window.activeNotebookEditor;
+
+      if (activeEditor) {
+        // Try to find the notebook for this editor
+        const notebook = vscode.workspace.notebookDocuments.find((nb) => {
+          for (let i = 0; i < nb.cellCount; i++) {
+            const cell = nb.cellAt(i);
+            if (
+              cell.document.uri.toString() ===
+              activeEditor.document.uri.toString()
+            ) {
+              return true;
+            }
+          }
+          return false;
+        });
+
+        if (notebook) {
+          // If the editor is part of a notebook, load notebook decorations
+          const storedDecorations = notebookDecorationStore.get(
+            notebook.uri.toString()
+          );
+
+          if (storedDecorations) {
+            storedDecorations.forEach((decorationState) => {
+              const decorationType =
+                vscode.window.createTextEditorDecorationType({
+                  backgroundColor: decorationState.backgroundColor,
+                });
+
+              activeEditor.setDecorations(
+                decorationType,
+                decorationState.ranges
+              );
+            });
+
+            vscode.window.showInformationMessage(
+              `Loaded ${storedDecorations.length} decorations for notebook`
+            );
+          } else {
+            vscode.window.showInformationMessage(
+              "No stored decorations found for this notebook"
+            );
+          }
+        } else {
+          // Handle non-notebook text documents if needed
+          vscode.window.showInformationMessage(
+            "No decorations available for this document"
+          );
+        }
+      } else if (activeNotebookEditor) {
+        // Direct notebook editor handling
+        const storedDecorations = notebookDecorationStore.get(
+          activeNotebookEditor.notebook.uri.toString()
+        );
+
+        if (storedDecorations) {
+          // Find all text editors associated with this notebook
+          const notebookEditors = vscode.window.visibleTextEditors.filter(
+            (editor) => {
+              for (
+                let i = 0;
+                i < activeNotebookEditor.notebook.cellCount;
+                i++
+              ) {
+                const cell = activeNotebookEditor.notebook.cellAt(i);
+                if (
+                  cell.document.uri.toString() ===
+                  editor.document.uri.toString()
+                ) {
+                  return true;
+                }
+              }
+              return false;
+            }
+          );
+
+          // Apply decorations to all associated text editors
+          notebookEditors.forEach((editor) => {
+            storedDecorations.forEach((decorationState) => {
+              const decorationType =
+                vscode.window.createTextEditorDecorationType({
+                  backgroundColor: decorationState.backgroundColor,
+                });
+
+              editor.setDecorations(decorationType, decorationState.ranges);
+            });
+          });
+
+          vscode.window.showInformationMessage(
+            `Loaded ${storedDecorations.length} decorations for notebook`
+          );
+        } else {
+          vscode.window.showInformationMessage(
+            "No stored decorations found for this notebook"
+          );
+        }
+      } else {
+        vscode.window.showWarningMessage(
+          "No active text editor or notebook editor"
+        );
+      }
+    })
+  );
+
+  function loadNotebookDecorations(editor: vscode.TextEditor) {
+    const notebook = vscode.workspace.notebookDocuments.find((nb) => {
+      for (let i = 0; i < nb.cellCount; i++) {
+        const cell = nb.cellAt(i);
+        if (cell.document.uri.toString() === editor.document.uri.toString()) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (notebook) {
+      const storedDecorations = notebookDecorationStore.get(
+        notebook.uri.toString()
+      );
+
+      if (storedDecorations) {
+        storedDecorations.forEach((decorationState) => {
+          const decorationType = vscode.window.createTextEditorDecorationType({
+            backgroundColor: decorationState.backgroundColor,
+          });
+
+          editor.setDecorations(decorationType, decorationState.ranges);
+        });
+      }
+    }
+  }
+
+  // Handle decorations when a file is closed
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      // Clear decorations for the closed document
+      const fileUri = document.uri.toString();
+      //notebookDecorationStore.delete(fileUri);
+    })
+  );
+
+  // Add event listener for notebook cell changes
+  context.subscriptions.push(
+    vscode.window.onDidChangeVisibleTextEditors((editors) => {
+      editors.forEach((editor) => {
+        const notebook = vscode.workspace.notebookDocuments.find((nb) => {
+          for (let i = 0; i < nb.cellCount; i++) {
+            const cell = nb.cellAt(i);
+            if (
+              cell.document.uri.toString() === editor.document.uri.toString()
+            ) {
+              return true;
+            }
+          }
+          return false;
+        });
+
+        // Only load decorations if the editor is part of a notebook
+        if (notebook) {
+          loadNotebookDecorations(editor);
+        }
+      });
+    })
+  );
+
+  // Handle notebook document changes
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeNotebookDocument((event) => {
+      // If a notebook document changes, update its decorations
+      if (event.notebook) {
+        const storedDecorations = notebookDecorationStore.get(
+          event.notebook.uri.toString()
+        );
+
+        // Reapply decorations if they exist
+        if (storedDecorations) {
+          // Find the visible text editors for this notebook
+          const notebookEditors = vscode.window.visibleTextEditors.filter(
+            (editor) => {
+              for (let i = 0; i < event.notebook.cellCount; i++) {
+                const cell = event.notebook.cellAt(i);
+                if (
+                  cell.document.uri.toString() ===
+                  editor.document.uri.toString()
+                ) {
+                  return true;
+                }
+              }
+              return false;
+            }
+          );
+
+          // Reapply decorations to each matching editor
+          notebookEditors.forEach((editor) => {
+            storedDecorations.forEach((decorationState) => {
+              const decorationType =
+                vscode.window.createTextEditorDecorationType({
+                  backgroundColor: decorationState.backgroundColor,
+                });
+
+              editor.setDecorations(decorationType, decorationState.ranges);
+            });
+          });
+        }
+      }
+    })
+  );
+
+  // Reapply decorations when a text editor becomes active
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (!editor) {
+        return;
+      }
+
+      // Check if the editor is part of a notebook
+      const notebook = vscode.workspace.notebookDocuments.find((nb) => {
+        for (let i = 0; i < nb.cellCount; i++) {
+          const cell = nb.cellAt(i);
+          if (cell.document.uri.toString() === editor.document.uri.toString()) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+      // If part of a notebook, load its decorations
+      if (notebook) {
+        const storedDecorations = notebookDecorationStore.get(
+          notebook.uri.toString()
+        );
+
+        if (storedDecorations) {
+          storedDecorations.forEach((decorationState) => {
+            const decorationType = vscode.window.createTextEditorDecorationType(
+              {
+                backgroundColor: decorationState.backgroundColor,
+              }
+            );
+
+            editor.setDecorations(decorationType, decorationState.ranges);
+          });
+        }
+      }
+    })
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -148,6 +497,59 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 }
 
+// Gestion des décorations par fichier
+function getStoredRangesForFile(fileUri: string): vscode.Range[] {
+  // Remplacez cette logique par une gestion des ranges si vous enregistrez les positions
+  return [];
+}
+
+function mapNotebookCellLinesToHtmlLineNumbers(
+  notebook: vscode.NotebookDocument,
+  htmlPath: string
+): Map<number, number> {
+  const lineMapping = new Map<number, number>();
+
+  // Read the HTML content
+  const htmlContent = fs.readFileSync(htmlPath, "utf8");
+  const $ = cheerio.load(htmlContent);
+
+  // Extract all line numbers from HTML spans
+  const htmlLineNumbers: number[] = [];
+  $("span[id]").each((_, element) => {
+    const lineNumber = parseInt($(element).attr("id") || "0", 10);
+    if (lineNumber > 0) {
+      htmlLineNumbers.push(lineNumber);
+    }
+  });
+
+  // Iterate through notebook cells and match their content with HTML line numbers
+  let currentHtmlLineIndex = 0;
+  notebook.cellCount > 0 && notebook.cellAt(0);
+
+  for (let i = 0; i < notebook.cellCount; i++) {
+    const cell = notebook.cellAt(i);
+
+    // Only process code cells
+    if (cell.kind === vscode.NotebookCellKind.Code) {
+      const cellText = cell.document.getText();
+      const cellLines = cellText.split("\n");
+
+      // Try to match cell content with consecutive HTML line numbers
+      for (let j = 0; j < cellLines.length; j++) {
+        if (currentHtmlLineIndex < htmlLineNumbers.length) {
+          lineMapping.set(
+            cell.index * 1000 + j, // Use a unique key combining cell index and line
+            htmlLineNumbers[currentHtmlLineIndex]
+          );
+          currentHtmlLineIndex++;
+        }
+      }
+    }
+  }
+
+  return lineMapping;
+}
+
 async function runDockerContainer(
   filePath: string,
   collection: vscode.DiagnosticCollection
@@ -231,10 +633,7 @@ async function runDockerContainer(
     // Close the log stream
     logStream.end();
 
-    parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
-
-    // Appeler cleanup pour supprimer le fichier HTML
-    cleanup(htmlOutputPath);
+    //parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error(`Error: ${errorMessage}`);
@@ -322,45 +721,60 @@ function detectLeakage(
   diagnostics: vscode.Diagnostic[]
 ) {
   if (backgroundColor === "red") {
-    const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
+    const diagnosticSeverity = vscode.DiagnosticSeverity.Error;
     const diagnosticMessage = buttonText;
 
-    // Vérifie si une décoration avec le même texte existe déjà
-    const existingDecoration = decorations.find(
-      (decoration: vscode.TextEditorDecorationType) => {
-        const options = decoration as vscode.DecorationRenderOptions;
-        return options.after?.contentText === buttonText;
-      }
-    );
-
-    if (!existingDecoration) {
-      // Crée une décoration pour l'affichage de l'erreur
-      const decorationType = vscode.window.createTextEditorDecorationType({
-        after: {
-          contentText: buttonText, // Texte du bouton
-          backgroundColor: "red", // Couleur de fond rouge
-          color: "white", // Couleur du texte
-          margin: "0 10px 0 10px", // Espacement
-        },
-        borderRadius: "5px", // Arrondi des coins
-        cursor: "pointer", // Apparence du curseur
-      });
-      // Ajoute la décoration
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        editor.setDecorations(decorationType, [range]);
-        decorations.push(decorationType);
-      }
-    } else {
-      // Ajoute la décoration
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        editor.setDecorations(existingDecoration, [range]);
-        decorations.push(existingDecoration);
-      }
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return;
     }
 
-    // Ajoute le diagnostic
+    // Find the containing notebook
+    const containingNotebook = vscode.workspace.notebookDocuments.find((nb) => {
+      for (let i = 0; i < nb.cellCount; i++) {
+        const cell = nb.cellAt(i);
+        if (cell.document.uri.toString() === editor.document.uri.toString()) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    // Create decoration type
+    const decorationType = vscode.window.createTextEditorDecorationType({
+      after: {
+        contentText: buttonText,
+        backgroundColor: "red",
+        color: "white",
+        margin: "0 10px 0 10px",
+      },
+      borderRadius: "5px",
+      cursor: "pointer",
+    });
+
+    // Set decorations for the current editor
+    editor.setDecorations(decorationType, [range]);
+
+    // Store decorations if in a notebook
+    if (containingNotebook) {
+      // Get existing decorations or initialize a new array
+      const existingDecorations =
+        notebookDecorationStore.get(containingNotebook.uri.toString()) || [];
+
+      // Add new decoration state
+      existingDecorations.push({
+        ranges: [range],
+        backgroundColor: "red",
+      });
+
+      // Update the notebook decoration store
+      notebookDecorationStore.set(
+        containingNotebook.uri.toString(),
+        existingDecorations
+      );
+    }
+
+    // Add diagnostic
     const diagnostic = new vscode.Diagnostic(
       range,
       diagnosticMessage,
@@ -377,10 +791,8 @@ function highlightTrainTestSites(
   range: vscode.Range,
   diagnostics: vscode.Diagnostic[]
 ) {
-  vscode.window.showErrorMessage("test2");
-
   if (buttonText === "train" || buttonText === "test") {
-    // Ajoute un diagnostic informatif
+    // Add an informative diagnostic
     const diagnosticMessage = `${buttonText} data`;
     const diagnostic = new vscode.Diagnostic(
       range,
@@ -397,7 +809,27 @@ function highlightTrainTestSites(
     if (match) {
       const [_, line1, line2] = match.map(Number);
 
-      // Crée une décoration pour l'affichage du texte
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+
+      // Find the containing notebook
+      const containingNotebook = vscode.workspace.notebookDocuments.find(
+        (nb) => {
+          for (let i = 0; i < nb.cellCount; i++) {
+            const cell = nb.cellAt(i);
+            if (
+              cell.document.uri.toString() === editor.document.uri.toString()
+            ) {
+              return true;
+            }
+          }
+          return false;
+        }
+      );
+
+      // Create decoration type
       const decorationType = vscode.window.createTextEditorDecorationType({
         after: {
           contentText: "highlight train/test sites",
@@ -406,22 +838,40 @@ function highlightTrainTestSites(
             : "rgba(135, 206, 250, 0.3)",
           margin: "0 10px 0 10px",
         },
-        borderRadius: "5px", // Arrondi des coins
-        cursor: "pointer", // Apparence du curseur
+        borderRadius: "5px",
+        cursor: "pointer",
       });
 
-      // Ajoute la décoration
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        editor.setDecorations(decorationType, [range]);
-        decorations.push(decorationType);
+      // Set decorations for the current editor
+      editor.setDecorations(decorationType, [range]);
+
+      // Store decorations if in a notebook
+      if (containingNotebook) {
+        // Get existing decorations or initialize a new array
+        const existingDecorations =
+          notebookDecorationStore.get(containingNotebook.uri.toString()) || [];
+
+        // Add new decoration state
+        existingDecorations.push({
+          ranges: [range],
+          backgroundColor: isThemeLight()
+            ? "rgba(173, 216, 230, 0.3)"
+            : "rgba(135, 206, 250, 0.3)",
+        });
+
+        // Update the notebook decoration store
+        notebookDecorationStore.set(
+          containingNotebook.uri.toString(),
+          existingDecorations
+        );
       }
-      // Enregistrer un HoverProvider pour ajouter un message de survol cliquable
+
+      // Register a hover provider with a clickable link to highlight lines
       vscode.languages.registerHoverProvider("*", {
         provideHover(document, position) {
           if (range.contains(position)) {
             const hoverMessage = new vscode.MarkdownString(
-              `[Cliquez pour surligner les données train/test](command:antileak-ml.highlightLine?${encodeURIComponent(
+              `[Click to highlight train/test sites](command:antileak-ml.highlightLine?${encodeURIComponent(
                 JSON.stringify([line1, line2])
               )})`
             );
@@ -495,15 +945,102 @@ function updateDiagnostics(
   notebook: vscode.NotebookDocument | null,
   collection: vscode.DiagnosticCollection
 ): void {
-  if (document && document.languageId === "python") {
+  if (notebook && notebook.notebookType === "jupyter-notebook") {
     collection.clear();
-    runDockerContainer(document.uri.fsPath, collection);
-  } else if (notebook && notebook.notebookType === "jupyter-notebook") {
-    collection.clear();
+
+    // Run the Docker container and get the HTML path
     runDockerContainer(notebook.uri.fsPath, collection);
+
+    const htmlOutputPath = path.join(
+      path.dirname(notebook.uri.fsPath),
+      path.basename(notebook.uri.fsPath, path.extname(notebook.uri.fsPath)) +
+        ".html"
+    );
+
+    // Map notebook cell lines to HTML line numbers
+    const lineMapping = mapNotebookCellLinesToHtmlLineNumbers(
+      notebook,
+      htmlOutputPath
+    );
+
+    // Modify existing parsing methods to use this line mapping
+    function modifiedParseHtmlForDiagnostics(
+      htmlOutputPath: string,
+      filePath: string,
+      collection: vscode.DiagnosticCollection,
+      lineMapping: Map<number, number>
+    ) {
+      const htmlContent = fs.readFileSync(htmlOutputPath, "utf8");
+      const $ = cheerio.load(htmlContent);
+
+      const diagnostics: vscode.Diagnostic[] = [];
+
+      $("button").each((index, element) => {
+        const buttonText = $(element).text().trim();
+        const onclickValue = $(element).attr("onclick");
+
+        const htmlLineNumber = parseInt(
+          $(element).prevAll("span[id]").first().attr("id") || "0",
+          10
+        );
+
+        // Find the corresponding notebook cell line
+        let notebookLineKey = -1;
+        for (const [key, value] of lineMapping.entries()) {
+          if (value === htmlLineNumber) {
+            notebookLineKey = key;
+            break;
+          }
+        }
+
+        if (notebookLineKey !== -1) {
+          const cellIndex = Math.floor(notebookLineKey / 1000);
+          const lineInCell = notebookLineKey % 1000;
+
+          const range = new vscode.Range(
+            new vscode.Position(cellIndex, lineInCell),
+            new vscode.Position(cellIndex, lineInCell + 1)
+          );
+
+          // Vérifie la couleur de fond du bouton
+          const backgroundColor = $(element).css("background-color");
+          // Rest of the existing logic for detecting leakage and highlighting
+          detectLeakage(buttonText, backgroundColor, range, diagnostics);
+          highlightTrainTestSites(
+            buttonText,
+            onclickValue,
+            htmlLineNumber,
+            range,
+            diagnostics
+          );
+        }
+      });
+
+      const fileUri = vscode.Uri.file(filePath);
+      collection.set(fileUri, diagnostics);
+    }
+
+    // Call the modified parsing method
+    modifiedParseHtmlForDiagnostics(
+      htmlOutputPath,
+      notebook.uri.fsPath,
+      collection,
+      lineMapping
+    );
+  } else if (document && document.languageId === "python") {
+    collection.clear();
+    const htmlOutputPath = path.join(
+      path.dirname(document.uri.fsPath),
+      path.basename(document.uri.fsPath, path.extname(document.uri.fsPath)) +
+        ".html"
+    );
+    runDockerContainer(document.uri.fsPath, collection);
+    parseHtmlForDiagnostics(htmlOutputPath, document.uri.fsPath, collection);
   } else {
     return;
   }
+  // Appeler cleanup pour supprimer le fichier HTML
+  //cleanup(htmlOutputPath);
 }
 
 // Fonction pour créer un type de décoration basé sur le thème actuel
@@ -513,12 +1050,25 @@ function isThemeLight(): boolean {
 
 function cleanup(filePath: string) {
   const dirPath = path.dirname(filePath);
+  const htmlOutputPath = path.join(
+    dirPath,
+    path.basename(filePath, path.extname(filePath)) + ".html"
+  );
 
   try {
     // Supprimer le fichier HTML
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      console.log(`File ${filePath} has been deleted.`);
+    if (fs.existsSync(htmlOutputPath)) {
+      fs.unlinkSync(htmlOutputPath);
+      console.log(`File ${htmlOutputPath} has been deleted.`);
+    }
+    // Supprimer le fichier Python temporaire si le fichier est un notebook
+    if (path.extname(filePath) === ".ipynb") {
+      const pythonTempFilePath = path.join(
+        dirPath,
+        path.basename(filePath, path.extname(filePath)) + ".py"
+      );
+      fs.unlinkSync(pythonTempFilePath);
+      console.log(`File ${pythonTempFilePath} has been deleted.`);
     }
 
     // Supprimer les dossiers finissant par -fact
