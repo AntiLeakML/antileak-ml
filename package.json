@@ -17,32 +17,19 @@
   "contributes": {
     "commands": [
       {
-        "command": "antileak-ml.helloWorld",
-        "title": "Hello World"
+        "command": "antileak-ml.detectPythonOrNotebook",
+        "title": "Detect File Type"
       },
       {
         "command": "antileak-ml.highlightLine",
         "title": "Highlight Line"
       }
     ],
-    "colors": [
+    "keybindings": [
       {
-        "id": "myextension.pandasHighlight",
-        "description": "Couleur de fond pour les mots 'pandas'",
-        "defaults": {
-          "dark": "#00FF0055",
-          "light": "#00FF0055",
-          "highContrast": "#00FF0055"
-        }
-      },
-      {
-        "id": "myextension.numpyHighlight",
-        "description": "Couleur de fond pour les mots 'numpy'",
-        "defaults": {
-          "dark": "#80008055",
-          "light": "#80008055",
-          "highContrast": "#80008055"
-        }
+        "command": "antileak-ml.detectPythonOrNotebook",
+        "key": "ctrl+alt+a",
+        "when": "resourceExtname =~ /\\.(py|ipynb)$/"
       }
     ]
   },
