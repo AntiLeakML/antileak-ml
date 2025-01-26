@@ -215,9 +215,7 @@ async function runDockerContainer(
     // Close the log stream
     logStream.end();
 
-    parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
-
-    mapNotebookCells();
+    await parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
 
     // Appeler cleanup pour supprimer le fichier HTML
     cleanup(htmlOutputPath);
@@ -233,7 +231,7 @@ async function runDockerContainer(
   }
 }
 
-function parseHtmlForDiagnostics(
+async function parseHtmlForDiagnostics(
   htmlPath: string,
   filePath: string,
   collection: vscode.DiagnosticCollection
@@ -243,10 +241,16 @@ function parseHtmlForDiagnostics(
 
   const diagnostics: vscode.Diagnostic[] = [];
 
+  const lineMappings = await jupyterNotebookParser.mapNotebookHTML(htmlPath);
+
   // Appelle parseSumTable pour analyser la table .sum
   parseSumTable($, diagnostics);
   // Recherche la table de classe "sum"
   const sumTable = $("table.sum").html();
+
+  vscode.window.showInformationMessage(`${lineMappings?.length}`);
+  console.log("here");
+  console.log(lineMappings?.length);
 
   if (sumTable) {
     // Générer le code HTML pour l'inclure dans le WebView
@@ -263,6 +267,9 @@ function parseHtmlForDiagnostics(
 
     // Parcours de tous les boutons
     $("button").each((index, element) => {
+      console.log("ici");
+      vscode.window.showInformationMessage(`${lineMappings?.length}`);
+
       const buttonText = $(element).text().trim(); // Texte du bouton
       const onclickValue = $(element).attr("onclick"); // Valeur de l'attribut onclick
 
@@ -270,27 +277,51 @@ function parseHtmlForDiagnostics(
       const lineNumberSpan = $(element).prevAll("span[id]").first();
       const lineNumber = parseInt(lineNumberSpan.attr("id") || "0", 10);
 
-      // Si un numéro de ligne valide est trouvé
-      if (lineNumber > 0) {
-        const range = new vscode.Range(
-          new vscode.Position(lineNumber - 1, 0), // Convertit le numéro de ligne en position 0-based
-          new vscode.Position(lineNumber - 1, 100) // Largeur arbitraire pour l'intervalle
+      if (lineMappings) {
+        console.log(`lineNumber: ${lineNumber}`);
+        const mapping = lineMappings.find(
+          (map: jupyterNotebookParser.NotebookLineMapping) =>
+            map.htmlRowNumber === lineNumber
         );
+        if (mapping) {
+          const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
+            mapping.notebookCellNumber
+          );
+          // Find the TextEditor for this cell's document
+          const cellTextEditor = vscode.window.visibleTextEditors.find(
+            (editor) =>
+              editor.document.uri.toString() === cell?.document.uri.toString()
+          );
+          const range = new vscode.Range(
+            new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convertit le numéro de ligne en position 0-based
+            new vscode.Position(mapping.lineNumberInCell - 1, 100) // Largeur arbitraire pour l'intervalle
+          );
 
-        // Vérifie la couleur de fond du bouton
-        const backgroundColor = $(element).css("background-color");
+          // Vérifie la couleur de fond du bouton
+          const backgroundColor = $(element).css("background-color");
 
-        jupyterNotebookParser.mapNotebookHTML();
-
-        // Appelle les fonctions de détection
-        detectLeakage(buttonText, backgroundColor, range, diagnostics);
-        highlightTrainTestSites(
-          buttonText,
-          onclickValue,
-          lineNumber,
-          range,
-          diagnostics
-        );
+          // Appelle les fonctions de détection
+          detectLeakage(
+            buttonText,
+            backgroundColor,
+            cellTextEditor,
+            range,
+            diagnostics
+          );
+          highlightTrainTestSites(
+            buttonText,
+            onclickValue,
+            cellTextEditor,
+            range,
+            diagnostics
+          );
+        } else {
+          console.log("pas de mapping");
+          vscode.window.showErrorMessage("Mapping undefined");
+        }
+      } else {
+        console.log("pas de lineMapping");
+        vscode.window.showErrorMessage("Line Mappings undefined");
       }
     });
 
@@ -306,10 +337,12 @@ function parseHtmlForDiagnostics(
 function detectLeakage(
   buttonText: string,
   backgroundColor: string | undefined,
+  cellTextEditor: vscode.TextEditor | undefined,
   range: vscode.Range,
   diagnostics: vscode.Diagnostic[]
 ) {
   if (backgroundColor === "red") {
+    vscode.window.showErrorMessage(`${range.start}`);
     const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
     const diagnosticMessage = buttonText;
 
@@ -334,16 +367,14 @@ function detectLeakage(
         cursor: "pointer", // Apparence du curseur
       });
       // Ajoute la décoration
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        editor.setDecorations(decorationType, [range]);
+      if (cellTextEditor) {
+        cellTextEditor.setDecorations(decorationType, [range]);
         globals.decorations.push(decorationType);
       }
     } else {
       // Ajoute la décoration
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        editor.setDecorations(existingDecoration, [range]);
+      if (cellTextEditor) {
+        cellTextEditor.setDecorations(existingDecoration, [range]);
         globals.decorations.push(existingDecoration);
       }
     }
@@ -361,7 +392,7 @@ function detectLeakage(
 function highlightTrainTestSites(
   buttonText: string,
   onclickValue: string | undefined,
-  lineNumber: number,
+  cellTextEditor: vscode.TextEditor | undefined,
   range: vscode.Range,
   diagnostics: vscode.Diagnostic[]
 ) {
@@ -399,9 +430,8 @@ function highlightTrainTestSites(
       });
 
       // Ajoute la décoration
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        editor.setDecorations(decorationType, [range]);
+      if (cellTextEditor) {
+        cellTextEditor.setDecorations(decorationType, [range]);
         globals.decorations.push(decorationType);
       }
       // Enregistrer un HoverProvider pour ajouter un message de survol cliquable
@@ -577,44 +607,4 @@ function deleteFolderRecursive(folderPath: string) {
     fs.rmdirSync(folderPath);
     console.log(`Directory ${folderPath} has been deleted.`);
   }
-}
-
-function mapNotebookCells() {
-  // Populate the cell mapping data structure
-  if (vscode.window.activeNotebookEditor) {
-    const notebook = vscode.window.activeNotebookEditor.notebook;
-    const cells = notebook.getCells();
-
-    cells.forEach((cell, index) => {
-      const cellId = cell.metadata.id;
-      const cellContent = cell.document.getText();
-      const startLine = cell.document.lineCount;
-      const endLine = startLine + cell.document.lineCount - 1;
-
-      // Calculate the corresponding HTML line numbers
-      const htmlStartLine = calculateHtmlLineOffset(cellContent, index);
-      const htmlEndLine = htmlStartLine + cell.document.lineCount - 1;
-
-      cellMapping[cellId] = {
-        startLine,
-        endLine,
-        htmlStartLine,
-        htmlEndLine,
-      };
-    });
-  }
-}
-
-function calculateHtmlLineOffset(cellContent: string, index: number): number {
-  // Implement a content-based hashing or text similarity metric to calculate the line offset
-  // For simplicity, we will use a simple string matching algorithm
-  const htmlContent = fs.readFileSync("path/to/html/file", "utf8");
-  const lines = htmlContent.split("\n");
-  let offset = 0;
-
-  for (let i = 0; i < index; i++) {
-    offset += lines[i].split("\n").length;
-  }
-
-  return offset;
 }

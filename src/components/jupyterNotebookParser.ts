@@ -5,7 +5,7 @@ import * as cheerio from "cheerio";
 /**
  * Interface representing the mapping between HTML and Jupyter Notebook lines
  */
-interface NotebookLineMapping {
+export interface NotebookLineMapping {
   htmlRowNumber: number;
   notebookCellNumber: number;
   lineNumberInCell: number;
@@ -37,25 +37,27 @@ export async function mapPygmentsHTMLLinesToNotebook(
   const lineMappings: NotebookLineMapping[] = [];
 
   // Extract lines from the highlighttable
+  let rowCounter = 0;
   const htmlLines: { lineNumber: number; lineContent: string }[] = [];
-  $(".highlighttable tr").each((rowIndex, row) => {
-    const lineNoCell = $(row).find(".linenos");
-    const codeCell = $(row).find(".code");
 
-    if (lineNoCell.length && codeCell.length) {
-      const lineNumber = parseInt(lineNoCell.text().trim());
-      const lineContent = codeCell
-        .map((i, span) => $(span).text().trim())
-        .get()
-        .join("");
+  // Cibler directement les éléments <span> dans <pre> sous la table .highlighttable
+  const codeSpans = $(" .highlighttable .code .highlight pre span");
 
-      if (!isNaN(lineNumber)) {
-        htmlLines.push({
-          lineNumber,
-          lineContent: lineContent || "", // Ensure empty string for empty lines
-        });
-      }
+  codeSpans.each((spanIndex, span) => {
+    const lineNumber = rowCounter; // Ligne courante
+    if ($(span).attr("id")) {
+      // Augmenter le compteur uniquement si le span a un id
+      rowCounter += 1;
     }
+
+    // Récupérer le contenu texte du span
+    const lineContent = $(span).text().trim();
+
+    // Ajouter les informations à htmlLines
+    htmlLines.push({
+      lineNumber,
+      lineContent: lineContent || "", // Assure une chaîne vide pour les lignes vides
+    });
   });
 
   // Iterate through notebook cells
@@ -88,8 +90,8 @@ export async function mapPygmentsHTMLLinesToNotebook(
     });
   });
 
-  // Write mappings to JSON file
-  await writeLineMappingsToFile(lineMappings, htmlFilePath);
+  // Write mappings to JSON file to debug
+  // await writeLineMappingsToFile(lineMappings, htmlFilePath);
 
   return lineMappings;
 }
@@ -136,18 +138,9 @@ async function writeLineMappingsToFile(
 /**
  * VS Code command to execute notebook HTML mapping
  */
-export async function mapNotebookHTML() {
-  // Prompt user to select HTML file
-  const htmlFileUris = await vscode.window.showOpenDialog({
-    canSelectMany: false,
-    filters: {
-      "HTML Files": ["html"],
-    },
-    title: "Select Pygments Notebook HTML File",
-  });
-
+export async function mapNotebookHTML(hmtlFilePath: string) {
   // Ensure a file was selected
-  if (!htmlFileUris || htmlFileUris.length === 0) {
+  if (!hmtlFilePath) {
     vscode.window.showInformationMessage("No HTML file selected.");
     return;
   }
@@ -163,12 +156,11 @@ export async function mapNotebookHTML() {
   try {
     // Perform mapping
     const lineMappings = await mapPygmentsHTMLLinesToNotebook(
-      htmlFileUris[0].fsPath,
+      hmtlFilePath,
       activeNotebook
     );
 
-    // Optional: Log mappings to console
-    console.log("Notebook Line Mappings:", lineMappings);
+    return lineMappings;
   } catch (error) {
     vscode.window.showErrorMessage(
       `Notebook HTML mapping failed: ${

@@ -15,12 +15,6 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("antileak-ml.parseNotebook", () => {
-      jupyterNotebookParser.mapNotebookHTML();
-    })
-  );
-
   const runAnalysisNotebook = vscode.commands.registerCommand(
     "antileak-ml.runAnalysisNotebook",
     () => {
