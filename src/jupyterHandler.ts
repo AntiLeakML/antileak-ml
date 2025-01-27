@@ -6,15 +6,27 @@ import * as cheerio from "cheerio";
 import { globals } from "./globals";
 import * as jupyterNotebookParser from "./components/jupyterNotebookParser";
 
-// Create a cell mapping data structure
-const cellMapping: {
-  [key: string]: {
-    startLine: number;
-    endLine: number;
-    htmlStartLine: number;
-    htmlEndLine: number;
-  };
-} = {};
+const decorationMap = new Map<
+  string,
+  Array<{
+    range: vscode.Range;
+    decorationType: vscode.TextEditorDecorationType;
+  }>
+>();
+
+const buttonsHTML = new Map<
+  string,
+  Array<{
+    mapping: jupyterNotebookParser.NotebookLineMapping;
+    buttonText: string;
+    backgroundColor: string | undefined;
+    onclickValue: string | undefined;
+  }>
+>();
+
+const diagnostics: vscode.Diagnostic[] = [];
+
+let lineMappings: jupyterNotebookParser.NotebookLineMapping[] | undefined;
 
 export async function handleJupyterFile(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
@@ -25,6 +37,24 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     { modal: true },
     "Yes",
     "No"
+  );
+
+  // Listen for visible text editors (including notebook cells)
+  context.subscriptions.push(
+    vscode.window.onDidChangeVisibleTextEditors((visibleEditors) => {
+      for (const textEditor of visibleEditors) {
+        if (textEditor.document.uri.scheme === "vscode-notebook-cell") {
+          updateDecorations(diagnostics);
+          const cellUri = textEditor.document.uri.toString();
+          const decorations = decorationMap.get(cellUri) || [];
+
+          // Reapply ALL stored decorations for this cell
+          decorations.forEach(({ range, decorationType }) => {
+            textEditor.setDecorations(decorationType, [range]);
+          });
+        }
+      }
+    })
   );
 
   // Proceed only if the user confirms
@@ -160,8 +190,6 @@ async function runDockerContainer(
       Tty: true,
       HostConfig: {
         Binds: [`${inputDir}:/app/leakage-analysis/test:rw`],
-        Memory: 8 * 1024 * 1024 * 1024, // 8 GB of memory
-        NanoCpus: 8000000000, // 5 CPUs
       },
     });
 
@@ -230,6 +258,76 @@ async function runDockerContainer(
     console.log(`Error logged to ${logFilePath}`);
   }
 }
+function updateDecorations(diagnostics: vscode.Diagnostic[]) {
+  function updateDecorations(diagnostics: vscode.Diagnostic[]) {
+    buttonsHTML.forEach((buttons, key) => {
+      // Track the key for each buttons array
+      // Create a copy of the buttons array to avoid modifying it while iterating
+      const buttonsCopy = [...buttons];
+
+      buttonsCopy.forEach((button) => {
+        if (lineMappings) {
+          const mapping = lineMappings.find(
+            (map: jupyterNotebookParser.NotebookLineMapping) =>
+              map.htmlRowNumber === button.mapping.htmlRowNumber
+          );
+          if (mapping) {
+            const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
+              mapping.notebookCellNumber
+            );
+            // Find the TextEditor for this cell's document (imperfect because we can only iterate through the visible ones)
+            const cellTextEditor = vscode.window.visibleTextEditors.find(
+              (editor) =>
+                editor.document.uri.toString() === cell?.document.uri.toString()
+            );
+            if (cellTextEditor) {
+              const range = new vscode.Range(
+                new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+                new vscode.Position(mapping.lineNumberInCell - 1, 100) // Arbitrary width for the range
+              );
+
+              // Call detection functions
+              detectLeakage(
+                button.buttonText,
+                button.backgroundColor,
+                cellTextEditor,
+                range,
+                diagnostics
+              );
+              highlightTrainTestSites(
+                button.buttonText,
+                button.onclickValue,
+                cellTextEditor,
+                range,
+                diagnostics
+              );
+            }
+
+            // Delete the button from the original buttons array
+            const index = buttons.indexOf(button);
+            if (index !== -1) {
+              buttons.splice(index, 1);
+            }
+          }
+        }
+      });
+
+      // If all buttons in the array have been processed, delete the array from the map
+      if (buttons.length === 0) {
+        buttonsHTML.delete(key);
+      }
+    });
+  }
+}
+
+// Function to generate a composite key
+function getCompositeKey(
+  htmlRowNumber: number,
+  buttonText: string,
+  backgroundColor: string | undefined
+): string {
+  return `${htmlRowNumber}-${buttonText}-${backgroundColor}`;
+}
 
 async function parseHtmlForDiagnostics(
   htmlPath: string,
@@ -239,18 +337,14 @@ async function parseHtmlForDiagnostics(
   const htmlContent = fs.readFileSync(htmlPath, "utf8");
   const $ = cheerio.load(htmlContent);
 
-  const diagnostics: vscode.Diagnostic[] = [];
-
-  const lineMappings = await jupyterNotebookParser.mapNotebookHTML(htmlPath);
+  lineMappings = await jupyterNotebookParser.mapNotebookHTML(htmlPath);
 
   // Appelle parseSumTable pour analyser la table .sum
   parseSumTable($, diagnostics);
   // Recherche la table de classe "sum"
   const sumTable = $("table.sum").html();
 
-  vscode.window.showInformationMessage(`${lineMappings?.length}`);
-  console.log("here");
-  console.log(lineMappings?.length);
+  let buttonCounter = 0;
 
   if (sumTable) {
     // Générer le code HTML pour l'inclure dans le WebView
@@ -267,18 +361,16 @@ async function parseHtmlForDiagnostics(
 
     // Parcours de tous les boutons
     $("button").each((index, element) => {
-      console.log("ici");
-      vscode.window.showInformationMessage(`${lineMappings?.length}`);
-
       const buttonText = $(element).text().trim(); // Texte du bouton
       const onclickValue = $(element).attr("onclick"); // Valeur de l'attribut onclick
+      // Vérifie la couleur de fond du bouton
+      const backgroundColor = $(element).css("background-color");
 
       // Cherche le span avec un attribut id qui contient le numéro de ligne
       const lineNumberSpan = $(element).prevAll("span[id]").first();
       const lineNumber = parseInt(lineNumberSpan.attr("id") || "0", 10);
 
       if (lineMappings) {
-        console.log(`lineNumber: ${lineNumber}`);
         const mapping = lineMappings.find(
           (map: jupyterNotebookParser.NotebookLineMapping) =>
             map.htmlRowNumber === lineNumber
@@ -287,34 +379,60 @@ async function parseHtmlForDiagnostics(
           const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
             mapping.notebookCellNumber
           );
-          // Find the TextEditor for this cell's document
+          // Find the TextEditor for this cell's document (imperfect because we can only iterate through the visible ones)
           const cellTextEditor = vscode.window.visibleTextEditors.find(
             (editor) =>
               editor.document.uri.toString() === cell?.document.uri.toString()
           );
-          const range = new vscode.Range(
-            new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convertit le numéro de ligne en position 0-based
-            new vscode.Position(mapping.lineNumberInCell - 1, 100) // Largeur arbitraire pour l'intervalle
-          );
+          if (cellTextEditor) {
+            const range = new vscode.Range(
+              new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convertit le numéro de ligne en position 0-based
+              new vscode.Position(mapping.lineNumberInCell - 1, 100) // Largeur arbitraire pour l'intervalle
+            );
 
-          // Vérifie la couleur de fond du bouton
-          const backgroundColor = $(element).css("background-color");
+            // Appelle les fonctions de détection
+            detectLeakage(
+              buttonText,
+              backgroundColor,
+              cellTextEditor,
+              range,
+              diagnostics
+            );
+            highlightTrainTestSites(
+              buttonText,
+              onclickValue,
+              cellTextEditor,
+              range,
+              diagnostics
+            );
+          } else {
+            const existing =
+              buttonsHTML.get(
+                getCompositeKey(
+                  mapping.htmlRowNumber,
+                  buttonText,
+                  backgroundColor
+                )
+              ) || [];
 
-          // Appelle les fonctions de détection
-          detectLeakage(
-            buttonText,
-            backgroundColor,
-            cellTextEditor,
-            range,
-            diagnostics
-          );
-          highlightTrainTestSites(
-            buttonText,
-            onclickValue,
-            cellTextEditor,
-            range,
-            diagnostics
-          );
+            // TODO: Avoid duplicates
+            if (!existing.length) {
+              existing.push({
+                mapping,
+                buttonText,
+                backgroundColor,
+                onclickValue,
+              });
+              buttonsHTML.set(
+                getCompositeKey(
+                  mapping.htmlRowNumber,
+                  buttonText,
+                  backgroundColor
+                ),
+                existing
+              );
+            }
+          }
         } else {
           console.log("pas de mapping");
           vscode.window.showErrorMessage("Mapping undefined");
@@ -342,7 +460,6 @@ function detectLeakage(
   diagnostics: vscode.Diagnostic[]
 ) {
   if (backgroundColor === "red") {
-    vscode.window.showErrorMessage(`${range.start}`);
     const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
     const diagnosticMessage = buttonText;
 
@@ -368,13 +485,23 @@ function detectLeakage(
       });
       // Ajoute la décoration
       if (cellTextEditor) {
-        cellTextEditor.setDecorations(decorationType, [range]);
+        //cellTextEditor.setDecorations(decorationType, [range]);
+        applyDecorationToCell(
+          cellTextEditor.document.uri,
+          range,
+          decorationType
+        );
         globals.decorations.push(decorationType);
       }
     } else {
       // Ajoute la décoration
       if (cellTextEditor) {
-        cellTextEditor.setDecorations(existingDecoration, [range]);
+        //cellTextEditor.setDecorations(existingDecoration, [range]);
+        applyDecorationToCell(
+          cellTextEditor.document.uri,
+          range,
+          existingDecoration
+        );
         globals.decorations.push(existingDecoration);
       }
     }
@@ -396,8 +523,6 @@ function highlightTrainTestSites(
   range: vscode.Range,
   diagnostics: vscode.Diagnostic[]
 ) {
-  vscode.window.showErrorMessage("test2");
-
   if (buttonText === "train" || buttonText === "test") {
     // Ajoute un diagnostic informatif
     const diagnosticMessage = `${buttonText} data`;
@@ -431,7 +556,12 @@ function highlightTrainTestSites(
 
       // Ajoute la décoration
       if (cellTextEditor) {
-        cellTextEditor.setDecorations(decorationType, [range]);
+        //cellTextEditor.setDecorations(decorationType, [range]);
+        applyDecorationToCell(
+          cellTextEditor.document.uri,
+          range,
+          decorationType
+        );
         globals.decorations.push(decorationType);
       }
       // Enregistrer un HoverProvider pour ajouter un message de survol cliquable
@@ -606,5 +736,36 @@ function deleteFolderRecursive(folderPath: string) {
     });
     fs.rmdirSync(folderPath);
     console.log(`Directory ${folderPath} has been deleted.`);
+  }
+}
+
+// Helper to apply AND store decorations with their type
+export function applyDecorationToCell(
+  cellUri: vscode.Uri,
+  range: vscode.Range,
+  decorationType: vscode.TextEditorDecorationType
+) {
+  if (cellUri) {
+    const uriString = cellUri.toString();
+    const existing = decorationMap.get(uriString) || [];
+
+    // Avoid duplicates
+    if (
+      !existing.some(
+        (d) => d.range.isEqual(range) && d.decorationType === decorationType
+      )
+    ) {
+      existing.push({ range, decorationType });
+      decorationMap.set(uriString, existing);
+    }
+
+    // Apply to visible editors
+    const visibleEditor = vscode.window.visibleTextEditors.find(
+      (e) => e.document.uri.toString() === uriString
+    );
+    if (visibleEditor) {
+      visibleEditor.setDecorations(decorationType, [range]);
+    }
+  } else {
   }
 }

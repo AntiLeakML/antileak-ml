@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
 import { handlePythonFile } from "./pythonHandler";
 import { handleJupyterFile } from "./jupyterHandler";
-import * as jupyterNotebookParser from "./components/jupyterNotebookParser";
 import { globals } from "./globals";
+
+let dockerMemory: number | undefined;
+let dockerNanoCPUs: number | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
