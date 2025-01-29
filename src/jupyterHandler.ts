@@ -259,65 +259,63 @@ async function runDockerContainer(
   }
 }
 function updateDecorations(diagnostics: vscode.Diagnostic[]) {
-  function updateDecorations(diagnostics: vscode.Diagnostic[]) {
-    buttonsHTML.forEach((buttons, key) => {
-      // Track the key for each buttons array
-      // Create a copy of the buttons array to avoid modifying it while iterating
-      const buttonsCopy = [...buttons];
+  buttonsHTML.forEach((buttons, key) => {
+    // Track the key for each buttons array
+    // Create a copy of the buttons array to avoid modifying it while iterating
+    const buttonsCopy = [...buttons];
 
-      buttonsCopy.forEach((button) => {
-        if (lineMappings) {
-          const mapping = lineMappings.find(
-            (map: jupyterNotebookParser.NotebookLineMapping) =>
-              map.htmlRowNumber === button.mapping.htmlRowNumber
+    buttonsCopy.forEach((button) => {
+      if (lineMappings) {
+        const mapping = lineMappings.find(
+          (map: jupyterNotebookParser.NotebookLineMapping) =>
+            map.htmlRowNumber === button.mapping.htmlRowNumber
+        );
+        if (mapping) {
+          const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
+            mapping.notebookCellNumber
           );
-          if (mapping) {
-            const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
-              mapping.notebookCellNumber
+          // Find the TextEditor for this cell's document (imperfect because we can only iterate through the visible ones)
+          const cellTextEditor = vscode.window.visibleTextEditors.find(
+            (editor) =>
+              editor.document.uri.toString() === cell?.document.uri.toString()
+          );
+          if (cellTextEditor) {
+            const range = new vscode.Range(
+              new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+              new vscode.Position(mapping.lineNumberInCell - 1, 100) // Arbitrary width for the range
             );
-            // Find the TextEditor for this cell's document (imperfect because we can only iterate through the visible ones)
-            const cellTextEditor = vscode.window.visibleTextEditors.find(
-              (editor) =>
-                editor.document.uri.toString() === cell?.document.uri.toString()
+
+            // Call detection functions
+            detectLeakage(
+              button.buttonText,
+              button.backgroundColor,
+              cellTextEditor,
+              range,
+              diagnostics
             );
-            if (cellTextEditor) {
-              const range = new vscode.Range(
-                new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convert line number to 0-based position
-                new vscode.Position(mapping.lineNumberInCell - 1, 100) // Arbitrary width for the range
-              );
+            highlightTrainTestSites(
+              button.buttonText,
+              button.onclickValue,
+              cellTextEditor,
+              range,
+              diagnostics
+            );
+          }
 
-              // Call detection functions
-              detectLeakage(
-                button.buttonText,
-                button.backgroundColor,
-                cellTextEditor,
-                range,
-                diagnostics
-              );
-              highlightTrainTestSites(
-                button.buttonText,
-                button.onclickValue,
-                cellTextEditor,
-                range,
-                diagnostics
-              );
-            }
-
-            // Delete the button from the original buttons array
-            const index = buttons.indexOf(button);
-            if (index !== -1) {
-              buttons.splice(index, 1);
-            }
+          // Delete the button from the original buttons array
+          const index = buttons.indexOf(button);
+          if (index !== -1) {
+            buttons.splice(index, 1);
           }
         }
-      });
-
-      // If all buttons in the array have been processed, delete the array from the map
-      if (buttons.length === 0) {
-        buttonsHTML.delete(key);
       }
     });
-  }
+
+    // If all buttons in the array have been processed, delete the array from the map
+    if (buttons.length === 0) {
+      buttonsHTML.delete(key);
+    }
+  });
 }
 
 // Function to generate a composite key
