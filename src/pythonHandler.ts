@@ -3,7 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import Docker from "dockerode";
 import * as cheerio from "cheerio";
-import { globals } from "./globals";
+import { globals, getOrCreateDecorationType } from "./globals";
 
 const decorationMap = new Map<
   string,
@@ -15,7 +15,6 @@ const decorationMap = new Map<
 
 export async function handlePythonFile(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
-
   if (vscode.window.activeTextEditor) {
     let document = vscode.window.activeTextEditor.document;
     if (document && document.languageId === "python") {
@@ -29,9 +28,6 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
 
       // Proceed only if the user confirms
       if (confirmAnalysis === "Yes") {
-        // Reload the window
-        //await vscode.commands.executeCommand("workbench.action.reloadWindow");
-
         // Update diagnostics for the saved document
         updateDiagnostics(document, collection);
       }
@@ -96,34 +92,16 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
   );
 
   // Type de décoration défini globalement pour le surlignage
-  const decorationType = vscode.window.createTextEditorDecorationType({
+
+  // Définir les propriétés de la décoration
+  const decorationProperties: vscode.DecorationRenderOptions = {
     backgroundColor: isThemeLight()
       ? "rgba(173, 216, 230, 0.3)"
       : "rgba(135, 206, 250, 0.3)",
-  });
+  };
 
-  context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument(async (document) => {
-      if (document && document.languageId === "python") {
-        // Show a confirmation dialog
-        const confirmAnalysis = await vscode.window.showInformationMessage(
-          "Do you want to analyze your code for leakage ?",
-          { modal: true },
-          "Yes",
-          "No"
-        );
-
-        // Proceed only if the user confirms
-        if (confirmAnalysis === "Yes") {
-          // Reload the window
-          //await vscode.commands.executeCommand("workbench.action.reloadWindow");
-
-          // Update diagnostics for the saved document
-          updateDiagnostics(document, collection);
-        }
-      }
-    })
-  );
+  // Obtenir ou créer le decorationType
+  const decorationType = getOrCreateDecorationType(decorationProperties);
 
   async function runDockerContainer(
     filePath: string,
@@ -153,8 +131,6 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         Tty: true,
         HostConfig: {
           Binds: [`${inputDir}:/app/leakage-analysis/test:rw`],
-          Memory: 8 * 1024 * 1024 * 1024, // 8 GB of memory
-          NanoCpus: 8000000000, // 5 CPUs
         },
       });
 
@@ -167,14 +143,6 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         stderr: true,
       });
 
-      const logStream = fs.createWriteStream(logFilePath, { flags: "a" });
-      stream.pipe(logStream);
-
-      const output: Buffer[] = [];
-      stream.on("data", (chunk) => {
-        output.push(chunk); // Capture logs for parsing
-      });
-
       // Wait for the container to stop
       await container.wait();
 
@@ -185,11 +153,6 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         const stopErrorMessage =
           stopErr instanceof Error ? stopErr.message : String(stopErr);
         console.error(`Failed to stop container: ${stopErrorMessage}`);
-        fs.appendFileSync(
-          logFilePath,
-          `Failed to stop container: ${stopErrorMessage}\n`,
-          { encoding: "utf8" }
-        );
       }
 
       try {
@@ -198,15 +161,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         const removeErrorMessage =
           removeErr instanceof Error ? removeErr.message : String(removeErr);
         console.error(`Failed to remove container: ${removeErrorMessage}`);
-        fs.appendFileSync(
-          logFilePath,
-          `Failed to remove container: ${removeErrorMessage}\n`,
-          { encoding: "utf8" }
-        );
       }
-
-      // Close the log stream
-      logStream.end();
 
       parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
 
@@ -214,13 +169,17 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       cleanup(htmlOutputPath);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${errorMessage}`);
-      vscode.window.showErrorMessage(`Error: ${errorMessage}`);
-
-      // Write error to log file
-      const errorLog = `Error: ${errorMessage}\n`;
-      fs.appendFileSync(logFilePath, errorLog, { encoding: "utf8" });
-      console.log(`Error logged to ${logFilePath}`);
+      // Check if the error is due to Docker not running
+      if (
+        errorMessage.includes("//./pipe/docker_engine") ||
+        errorMessage.includes("Cannot connect to the Docker daemon")
+      ) {
+        vscode.window.showErrorMessage(
+          "Docker is not running. Please start Docker and try again."
+        );
+      } else {
+        vscode.window.showErrorMessage(`Error: ${errorMessage}`);
+      }
     }
   }
 
@@ -281,8 +240,16 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       const fileUri = vscode.Uri.file(filePath);
       collection.set(fileUri, diagnostics);
 
+      // Define a key for the global boolean variable
+      const SHOW_RESULTS_TABLE_KEY = "antileak-ml.showResultsTable";
+
+      // Retrieve the boolean value from global state (default to false if not set)
+      let showResultsTable = context.globalState.get(SHOW_RESULTS_TABLE_KEY);
+
       // Afficher la table dans un WebView
-      showHtmlInWebView(fullHtmlContent);
+      if (showResultsTable) {
+        showHtmlInWebView(fullHtmlContent);
+      }
     }
   }
 
@@ -296,49 +263,25 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
       const diagnosticMessage = buttonText;
 
-      // Vérifie si une décoration avec le même texte existe déjà
-      const existingDecoration = globals.decorations.find(
-        (decoration: vscode.TextEditorDecorationType) => {
-          const options = decoration as vscode.DecorationRenderOptions;
-          return options.after?.contentText === buttonText;
-        }
-      );
-
-      if (!existingDecoration) {
-        // Crée une décoration pour l'affichage de l'erreur
-        const decorationType = vscode.window.createTextEditorDecorationType({
-          after: {
-            contentText: buttonText, // Texte du bouton
-            backgroundColor: "red", // Couleur de fond rouge
-            color: "white", // Couleur du texte
-            margin: "0 10px 0 10px", // Espacement
-          },
-          borderRadius: "5px", // Arrondi des coins
-          cursor: "pointer", // Apparence du curseur
-        });
-        // Ajoute la décoration
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          const editorUri = editor?.document.uri.toString();
-          const existing = decorationMap.get(editorUri) || [];
-          editor.setDecorations(decorationType, [range]);
-          globals.decorations.push(decorationType);
-          existing.push({ range, decorationType });
-          decorationMap.set(editorUri, existing);
-        }
-      } else {
-        // Ajoute la décoration
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          const editorUri = editor?.document.uri.toString();
-          const existing = decorationMap.get(editorUri) || [];
-          editor.setDecorations(decorationType, [range]);
-          globals.decorations.push(decorationType);
-          existing.push({ range, decorationType });
-          decorationMap.set(editorUri, existing);
-        }
+      // Définir les propriétés de la décoration
+      const decorationProperties: vscode.DecorationRenderOptions = {
+        after: {
+          contentText: buttonText, // Texte du bouton
+          backgroundColor: "red", // Couleur de fond rouge
+          color: "white", // Couleur du texte
+          margin: "0 10px 0 10px", // Espacement
+        },
+        borderRadius: "5px", // Arrondi des coins
+        cursor: "pointer", // Apparence du curseur
+      };
+      const editor = vscode.window.activeTextEditor;
+      if (editor) {
+        const editorUri = editor?.document.uri.toString();
+        const existing = decorationMap.get(editorUri) || [];
+        editor.setDecorations(decorationType, [range]);
+        existing.push({ range, decorationType });
+        decorationMap.set(editorUri, existing);
       }
-
       // Ajoute le diagnostic
       const diagnostic = new vscode.Diagnostic(
         range,
@@ -370,13 +313,15 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
 
     if (buttonText === "highlight train/test sites" && onclickValue) {
+      console.log(onclickValue);
       const match = onclickValue.match(/highlight_lines\(\[(\d+),\s*(\d+)\]\)/);
 
       if (match) {
         const [_, line1, line2] = match.map(Number);
 
         // Crée une décoration pour l'affichage du texte
-        const decorationType = vscode.window.createTextEditorDecorationType({
+
+        const decorationProperties: vscode.DecorationRenderOptions = {
           after: {
             contentText: "highlight train/test sites",
             backgroundColor: isThemeLight()
@@ -386,7 +331,10 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
           },
           borderRadius: "5px", // Arrondi des coins
           cursor: "pointer", // Apparence du curseur
-        });
+        };
+
+        // Obtenir ou créer le decorationType
+        const decorationType = getOrCreateDecorationType(decorationProperties);
 
         // Ajoute la décoration
         const editor = vscode.window.activeTextEditor;
@@ -394,10 +342,10 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
           const editorUri = editor?.document.uri.toString();
           const existing = decorationMap.get(editorUri) || [];
           editor.setDecorations(decorationType, [range]);
-          globals.decorations.push(decorationType);
           existing.push({ range, decorationType });
           decorationMap.set(editorUri, existing);
         }
+        // TODO: avoid duplicates
         // Enregistrer un HoverProvider pour ajouter un message de survol cliquable
         vscode.languages.registerHoverProvider("*", {
           provideHover(document, position) {

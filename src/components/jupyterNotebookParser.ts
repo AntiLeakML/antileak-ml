@@ -2,9 +2,6 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as cheerio from "cheerio";
 
-/**
- * Interface representing the mapping between HTML and Jupyter Notebook lines
- */
 export interface NotebookLineMapping {
   htmlRowNumber: number;
   notebookCellNumber: number;
@@ -13,13 +10,6 @@ export interface NotebookLineMapping {
   originalLine: string;
 }
 
-/**
- * Maps lines from a Pygments-generated HTML representation to their corresponding locations in a Jupyter Notebook
- *
- * @param htmlFilePath Path to the HTML file representing the notebook
- * @param notebook The Jupyter notebook document to map against
- * @returns A map of line mappings
- */
 export async function mapPygmentsHTMLLinesToNotebook(
   htmlFilePath: string,
   notebook: vscode.NotebookDocument
@@ -36,93 +26,125 @@ export async function mapPygmentsHTMLLinesToNotebook(
   // Initialize mapping results
   const lineMappings: NotebookLineMapping[] = [];
 
-  // Extract lines from the highlighttable
-  let rowCounter = 0;
-  const htmlLines: { lineNumber: number; lineContent: string }[] = [];
+  // First pass: Extract all lines and their content from HTML
+  const htmlLines: {
+    lineNumber: number;
+    content: string;
+    isComment: boolean;
+  }[] = [];
+  let currentLineNumber = 1; // Start line numbering at 1
 
-  // Cibler directement les éléments <span> dans <pre> sous la table .highlighttable
-  const codeSpans = $(" .highlighttable .code .highlight pre span");
+  // Select all spans within the code section
+  const tableRows = $(".highlighttable .code .highlight pre > span");
 
-  codeSpans.each((spanIndex, span) => {
-    const lineNumber = rowCounter; // Ligne courante
-    if ($(span).attr("id")) {
-      // Augmenter le compteur uniquement si le span a un id
-      rowCounter += 1;
-    }
+  tableRows.each((_, element) => {
+    const span = $(element);
+    const content = span.text().trim();
+    const isComment = span.hasClass("c1"); // Check if it's a comment
 
-    // Récupérer le contenu texte du span
-    const lineContent = $(span).text().trim();
-
-    // Ajouter les informations à htmlLines
+    // Add every span as a line, regardless of whether it has an id
     htmlLines.push({
-      lineNumber,
-      lineContent: lineContent || "", // Assure une chaîne vide pour les lignes vides
+      lineNumber: currentLineNumber,
+      content,
+      isComment,
     });
+
+    // Only increment line number for spans that would traditionally have an id
+    // This maintains alignment with the line numbers shown in the HTML
+    if (span.attr("id") || content) {
+      currentLineNumber++;
+    }
   });
 
-  // Iterate through notebook cells
+  // Second pass: Process notebook cells and create mappings
   notebook.getCells().forEach((cell, cellIndex) => {
-    // Get cell source lines, excluding comments
-    const sourceLines = cell.document
-      .getText()
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"));
+    const cellLines = cell.document.getText().split("\n");
 
-    // Match notebook cell lines to HTML lines
-    sourceLines.forEach((sourceLine, lineIndexInCell) => {
-      // Find all matching HTML line indices
-      const matchingHtmlLines = htmlLines.filter((htmlLine) =>
-        htmlLine.lineContent.includes(sourceLine)
-      );
+    cellLines.forEach((cellLine, lineIndexInCell) => {
+      const trimmedCellLine = cellLine.trim();
+
+      // Skip empty lines in the notebook
+      if (!trimmedCellLine) {
+        return;
+      }
+
+      // Find matching HTML lines
+      const matchingHtmlLines = htmlLines.filter((htmlLine) => {
+        // For comments, do an exact match after trimming
+        if (htmlLine.isComment) {
+          return htmlLine.content === trimmedCellLine;
+        }
+
+        // For non-comments, remove leading/trailing whitespace and comments
+        const cleanHtmlContent = htmlLine.content
+          .trim()
+          .replace(/^\s*#.*$/, ""); // Remove comment lines
+
+        if (!cleanHtmlContent) {
+          return false;
+        }
+
+        // Check if the HTML line contains the notebook line
+        return cleanHtmlContent.includes(trimmedCellLine);
+      });
 
       // Create mappings for each match
       matchingHtmlLines.forEach((matchedLine) => {
         lineMappings.push({
           htmlRowNumber: matchedLine.lineNumber,
           notebookCellNumber: cellIndex,
-          lineNumberInCell: lineIndexInCell,
+          lineNumberInCell: lineIndexInCell + 1,
           cellType:
             cell.kind === vscode.NotebookCellKind.Code ? "code" : "markdown",
-          originalLine: sourceLine,
+          originalLine: trimmedCellLine,
         });
       });
     });
   });
 
+  // Add unmapped lines to mappings
+  htmlLines.forEach((htmlLine) => {
+    const isLineAlreadyMapped = lineMappings.some(
+      (mapping) => mapping.htmlRowNumber === htmlLine.lineNumber
+    );
+
+    if (!isLineAlreadyMapped) {
+      lineMappings.push({
+        htmlRowNumber: htmlLine.lineNumber,
+        notebookCellNumber: -1, // Indicate no direct cell mapping
+        lineNumberInCell: -1,
+        cellType: "code", // Assume code cell for unmapped lines
+        originalLine: htmlLine.content,
+      });
+    }
+  });
+
+  // Sort final mappings by HTML line number
+  lineMappings.sort((a, b) => a.htmlRowNumber - b.htmlRowNumber);
+
   // Write mappings to JSON file to debug
-  // await writeLineMappingsToFile(lineMappings, htmlFilePath);
+  //await writeLineMappingsToFile(lineMappings, htmlFilePath);
 
   return lineMappings;
 }
 
-/**
- * Writes line mappings to a JSON file in the same directory as the HTML file
- *
- * @param mappings The line mappings to write
- * @param htmlFilePath Path of the original HTML file
- */
 async function writeLineMappingsToFile(
   mappings: NotebookLineMapping[],
   htmlFilePath: string
 ): Promise<void> {
   try {
-    // Generate output filename
     const outputFilename = path.join(
       path.dirname(htmlFilePath),
       `notebook_line_mappings_${Date.now()}.json`
     );
 
-    // Convert mappings to JSON
     const jsonContent = JSON.stringify(mappings, null, 2);
 
-    // Write file using workspace filesystem
     await vscode.workspace.fs.writeFile(
       vscode.Uri.file(outputFilename),
       new TextEncoder().encode(jsonContent)
     );
 
-    // Notify user
     vscode.window.showInformationMessage(
       `Line mappings saved to ${outputFilename}. Total mappings: ${mappings.length}`
     );
@@ -135,17 +157,12 @@ async function writeLineMappingsToFile(
   }
 }
 
-/**
- * VS Code command to execute notebook HTML mapping
- */
-export async function mapNotebookHTML(hmtlFilePath: string) {
-  // Ensure a file was selected
-  if (!hmtlFilePath) {
+export async function mapNotebookHTML(htmlFilePath: string) {
+  if (!htmlFilePath) {
     vscode.window.showInformationMessage("No HTML file selected.");
     return;
   }
 
-  // Get active notebook
   const activeNotebook = vscode.window.activeNotebookEditor?.notebook;
 
   if (!activeNotebook) {
@@ -154,9 +171,8 @@ export async function mapNotebookHTML(hmtlFilePath: string) {
   }
 
   try {
-    // Perform mapping
     const lineMappings = await mapPygmentsHTMLLinesToNotebook(
-      hmtlFilePath,
+      htmlFilePath,
       activeNotebook
     );
 

@@ -25,12 +25,12 @@
         "title": "AntiLeak: Analyze Jupyter Notebook"
       },
       {
-        "command": "antileak-ml.parseNotebook",
-        "title": "AntiLeak: Parse Notebook"
-      },
-      {
         "command": "antileak-ml.highlightLine",
         "title": "AntiLeak: Highlight Lines"
+      },
+      {
+        "command": "antileak-ml.toggleTable",
+        "title": "AntiLeak: Toggle Results Table"
       }
     ],
     "keybindings": [

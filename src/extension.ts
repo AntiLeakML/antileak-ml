@@ -24,6 +24,32 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Define a key for the global boolean variable
+  const SHOW_RESULTS_TABLE_KEY = "antileak-ml.showResultsTable";
+
+  // Retrieve the boolean value from global state (default to false if not set)
+  let showResultsTable = context.globalState.get(SHOW_RESULTS_TABLE_KEY, false);
+
+  // Command to toggle the boolean value
+  const toggleResultsTable = vscode.commands.registerCommand(
+    "antileak-ml.toggleTable",
+    () => {
+      // Toggle the boolean value
+      showResultsTable = !showResultsTable;
+
+      // Update the global state with the new value
+      context.globalState.update(SHOW_RESULTS_TABLE_KEY, showResultsTable);
+
+      // Notify the user (optional)
+      vscode.window.showInformationMessage(
+        `Results table visibility is now: ${showResultsTable ? "ON" : "OFF"}`
+      );
+    }
+  );
+
+  // Register the command
+  context.subscriptions.push(toggleResultsTable);
+
   // Ajouter les commandes au contexte de l'extension
   context.subscriptions.push(runAnalysisPython, runAnalysisNotebook);
 
@@ -71,6 +97,27 @@ export async function activate(context: vscode.ExtensionContext) {
     updateStatusBar,
     null,
     context.subscriptions
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(async (document) => {
+      const fileExtension = document.fileName.split(".").pop();
+      if (document && fileExtension === "py") {
+        handlePythonFile(context);
+      } else if (fileExtension === "ipynb") {
+        handlePythonFile(context);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveNotebookDocument(async (document) => {
+      if (document && document.uri.path.endsWith("py")) {
+        handlePythonFile(context);
+      } else if (document.uri.path.endsWith("ipynb")) {
+        handlePythonFile(context);
+      }
+    })
   );
 }
 
