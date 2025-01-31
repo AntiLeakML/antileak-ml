@@ -68,9 +68,20 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
           const cellUri = textEditor.document.uri.toString();
           const decorations = decorationMap.get(cellUri) || [];
 
-          // Reapply ALL stored decorations for this cell
+          // Group decorations by their decoration type
+          const decorationsByType = new Map<
+            vscode.TextEditorDecorationType,
+            vscode.Range[]
+          >();
+
           decorations.forEach(({ range, decorationType }) => {
-            textEditor.setDecorations(decorationType, [range]);
+            const existingRanges = decorationsByType.get(decorationType) || [];
+            decorationsByType.set(decorationType, [...existingRanges, range]);
+          });
+
+          // Reapply ALL stored decorations for this cell, preserving existing ranges for each type
+          decorationsByType.forEach((ranges, decorationType) => {
+            textEditor.setDecorations(decorationType, ranges);
           });
         }
       }
@@ -577,8 +588,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             globals.registeredHoverProviders.delete(providerkey);
           }
 
-          const counter = globals.registeredHoverProviders.size.valueOf();
-
           // Register new hover provider
           const hoverProvider = vscode.languages.registerHoverProvider(
             {
@@ -592,7 +601,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
                   document === cellTextEditor.document
                 ) {
                   const hoverMessage = new vscode.MarkdownString(
-                    `[Click to highlight train/test data ${counter}](command:antileak-ml.highlightLine?${encodeURIComponent(
+                    `[Click to highlight train/test data](command:antileak-ml.highlightLine?${encodeURIComponent(
                       JSON.stringify([line1, line2])
                     )})`
                   );
