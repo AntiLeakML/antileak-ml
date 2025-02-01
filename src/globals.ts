@@ -11,8 +11,13 @@ export const globals = {
     }
   >(),
   highlightedLines: new Set() as Set<string>,
-  highlightDecorationType: vscode.TextEditorDecorationType,
 };
+
+// Define a type for stored decoration info
+export interface StoredDecoration {
+  range: vscode.Range;
+  decorationType: vscode.TextEditorDecorationType;
+}
 
 // Helper function to create a unique key for a range
 export function getRangeKey(range: vscode.Range): string {

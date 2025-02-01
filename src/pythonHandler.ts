@@ -3,18 +3,23 @@ import * as path from "path";
 import * as fs from "fs";
 import Docker from "dockerode";
 import * as cheerio from "cheerio";
-import { globals, getOrCreateDecorationType } from "./globals";
+import {
+  globals,
+  getOrCreateDecorationType,
+  StoredDecoration,
+  isThemeLight,
+} from "./globals";
 
-const decorationMap = new Map<
-  string,
-  Array<{
-    range: vscode.Range;
-    decorationType: vscode.TextEditorDecorationType;
-  }>
->();
+const decorationMap = new Map<string, StoredDecoration[]>();
+const highlightDecorationType = getOrCreateDecorationType({
+  backgroundColor: isThemeLight()
+    ? "rgba(173, 216, 230, 0.3)"
+    : "rgba(135, 206, 250, 0.3)",
+});
 
 export async function handlePythonFile(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
+
   if (vscode.window.activeTextEditor) {
     let document = vscode.window.activeTextEditor.document;
     if (document && document.languageId === "python") {
@@ -80,28 +85,16 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
           // Si les lignes sont déjà surlignées, retirer le surlignage
           globals.highlightedLines.delete(key1);
           globals.highlightedLines.delete(key2);
-          editor.setDecorations(decorationType, []);
+          editor.setDecorations(highlightDecorationType, []);
         } else {
           // Sinon, appliquer le surlignage
           globals.highlightedLines.add(key1);
           globals.highlightedLines.add(key2);
-          editor.setDecorations(decorationType, [range1, range2]);
+          editor.setDecorations(highlightDecorationType, [range1, range2]);
         }
       }
     )
   );
-
-  // Type de décoration défini globalement pour le surlignage
-
-  // Définir les propriétés de la décoration
-  const decorationProperties: vscode.DecorationRenderOptions = {
-    backgroundColor: isThemeLight()
-      ? "rgba(173, 216, 230, 0.3)"
-      : "rgba(135, 206, 250, 0.3)",
-  };
-
-  // Obtenir ou créer le decorationType
-  const decorationType = getOrCreateDecorationType(decorationProperties);
 
   async function runDockerContainer(
     filePath: string,
@@ -111,7 +104,6 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     const inputDir = path.dirname(filePath);
     const fileName = path.basename(filePath);
     const imageName = "nat2194/leakage-analysis:1.0";
-    const logFilePath = path.join(inputDir, "docker_logs.txt"); // Log file path
     const extension = path.extname(filePath);
     const newExtension = ".html";
 
@@ -134,14 +126,8 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         },
       });
 
+      // Wait for the container to start
       await container.start();
-
-      // Attach to the container stream
-      const stream = await container.logs({
-        follow: true,
-        stdout: true,
-        stderr: true,
-      });
 
       // Wait for the container to stop
       await container.wait();
@@ -165,7 +151,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
 
       parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
 
-      // Appeler cleanup pour supprimer le fichier HTML
+      // Call cleanup to remove the HTML output file
       cleanup(htmlOutputPath);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -260,29 +246,26 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     diagnostics: vscode.Diagnostic[]
   ) {
     if (backgroundColor === "red") {
-      const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
+      const diagnosticSeverity = vscode.DiagnosticSeverity.Error;
       const diagnosticMessage = buttonText;
 
-      // Définir les propriétés de la décoration
       const decorationProperties: vscode.DecorationRenderOptions = {
         after: {
-          contentText: buttonText, // Texte du bouton
-          backgroundColor: "red", // Couleur de fond rouge
-          color: "white", // Couleur du texte
-          margin: "0 10px 0 10px", // Espacement
+          contentText: buttonText,
+          backgroundColor: "red",
+          color: "white",
+          margin: "0 10px 0 10px",
         },
-        borderRadius: "5px", // Arrondi des coins
-        cursor: "pointer", // Apparence du curseur
+        borderRadius: "5px",
+        cursor: "pointer",
       };
+
+      const decorationType = getOrCreateDecorationType(decorationProperties);
       const editor = vscode.window.activeTextEditor;
       if (editor) {
-        const editorUri = editor?.document.uri.toString();
-        const existing = decorationMap.get(editorUri) || [];
-        editor.setDecorations(decorationType, [range]);
-        existing.push({ range, decorationType });
-        decorationMap.set(editorUri, existing);
+        applyDecorationToFile(editor.document.uri, range, decorationType);
       }
-      // Ajoute le diagnostic
+
       const diagnostic = new vscode.Diagnostic(
         range,
         diagnosticMessage,
@@ -298,28 +281,20 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     range: vscode.Range,
     diagnostics: vscode.Diagnostic[]
   ) {
-    vscode.window.showErrorMessage("test2");
-
     if (buttonText === "train" || buttonText === "test") {
-      // Ajoute un diagnostic informatif
       const diagnosticMessage = `${buttonText} data`;
       const diagnostic = new vscode.Diagnostic(
         range,
         diagnosticMessage,
         vscode.DiagnosticSeverity.Warning
       );
-
       diagnostics.push(diagnostic);
     }
 
     if (buttonText === "highlight train/test sites" && onclickValue) {
-      console.log(onclickValue);
       const match = onclickValue.match(/highlight_lines\(\[(\d+),\s*(\d+)\]\)/);
-
       if (match) {
         const [_, line1, line2] = match.map(Number);
-
-        // Crée une décoration pour l'affichage du texte
 
         const decorationProperties: vscode.DecorationRenderOptions = {
           after: {
@@ -329,33 +304,24 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
               : "rgba(135, 206, 250, 0.3)",
             margin: "0 10px 0 10px",
           },
-          borderRadius: "5px", // Arrondi des coins
-          cursor: "pointer", // Apparence du curseur
+          borderRadius: "5px",
+          cursor: "pointer",
         };
 
-        // Obtenir ou créer le decorationType
         const decorationType = getOrCreateDecorationType(decorationProperties);
-
-        // Ajoute la décoration
         const editor = vscode.window.activeTextEditor;
         if (editor) {
-          const editorUri = editor?.document.uri.toString();
-          const existing = decorationMap.get(editorUri) || [];
-          editor.setDecorations(decorationType, [range]);
-          existing.push({ range, decorationType });
-          decorationMap.set(editorUri, existing);
+          applyDecorationToFile(editor.document.uri, range, decorationType);
         }
-        // TODO: avoid duplicates
-        // Enregistrer un HoverProvider pour ajouter un message de survol cliquable
+
         vscode.languages.registerHoverProvider("*", {
           provideHover(document, position) {
-            if (range.contains(position)) {
+            if (range.contains(position) && document === editor?.document) {
               const hoverMessage = new vscode.MarkdownString(
-                `[Cliquez pour surligner les données train/test](command:antileak-ml.highlightLine?${encodeURIComponent(
+                `[Click to highlight train/test data](command:antileak-ml.highlightLine?${encodeURIComponent(
                   JSON.stringify([line1, line2])
                 )})`
               );
-
               hoverMessage.isTrusted = true;
               return new vscode.Hover(hoverMessage);
             }
@@ -520,4 +486,69 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       console.log(`Directory ${folderPath} has been deleted.`);
     }
   }
+
+  function applyDecorationToFile(
+    fileUri: vscode.Uri,
+    range: vscode.Range,
+    decorationType: vscode.TextEditorDecorationType
+  ) {
+    const uriString = fileUri.toString();
+    let fileDecorations = decorationMap.get(uriString) || [];
+
+    const existingDecorationIndex = fileDecorations.findIndex(
+      (d) =>
+        d.range.isEqual(range) && d.decorationType.key === decorationType.key
+    );
+
+    if (existingDecorationIndex === -1) {
+      fileDecorations.push({ range, decorationType });
+    } else {
+      fileDecorations[existingDecorationIndex] = { range, decorationType };
+    }
+
+    decorationMap.set(uriString, fileDecorations);
+
+    const visibleEditor = vscode.window.visibleTextEditors.find(
+      (editor) => editor.document.uri.toString() === uriString
+    );
+
+    if (visibleEditor) {
+      const decorationsByType = new Map<
+        vscode.TextEditorDecorationType,
+        vscode.Range[]
+      >();
+
+      fileDecorations.forEach((decoration) => {
+        const ranges = decorationsByType.get(decoration.decorationType) || [];
+        ranges.push(decoration.range);
+        decorationsByType.set(decoration.decorationType, ranges);
+      });
+
+      decorationsByType.forEach((ranges, decType) => {
+        visibleEditor.setDecorations(decType, ranges);
+      });
+    }
+  }
+}
+
+export function pythonHandlerDeactivate() {
+  // Clean up decorations
+  for (const decorations of decorationMap.values()) {
+    decorations.forEach(({ decorationType }) => {
+      decorationType.dispose(); // Dispose of each decoration type
+    });
+  }
+  decorationMap.clear(); // Clear the decoration map
+
+  // Clean up hover providers
+  for (const providerInfo of globals.registeredHoverProviders.values()) {
+    providerInfo.provider.dispose(); // Dispose of each hover provider
+  }
+  globals.registeredHoverProviders.clear(); // Clear the hover providers map
+
+  // Clear highlighted lines
+  globals.highlightedLines.clear();
+
+  // Optionally, log a message indicating that the Python handler has been deactivated
+  console.log("Python handler has been deactivated.");
 }

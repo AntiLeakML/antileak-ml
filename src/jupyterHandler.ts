@@ -6,23 +6,13 @@ import * as cheerio from "cheerio";
 import {
   globals,
   getOrCreateDecorationType,
-  getRangeKey,
-  getDecorationKey,
+  StoredDecoration,
   getCompositeRangeKey,
   isThemeLight,
 } from "./globals";
 import * as jupyterNotebookParser from "./components/jupyterNotebookParser";
-import { isUndefined } from "util";
-
-// Define a type for stored decoration info
-interface StoredDecoration {
-  range: vscode.Range;
-  decorationType: vscode.TextEditorDecorationType;
-}
 
 const decorationMap = new Map<string, StoredDecoration[]>();
-
-const decorationTypes: vscode.TextEditorDecorationType[] = [];
 
 const buttonsHTML = new Map<
   string,
@@ -38,19 +28,16 @@ const diagnostics: vscode.Diagnostic[] = [];
 
 let lineMappings: jupyterNotebookParser.NotebookLineMapping[] | undefined;
 
+const highlightDecorationType = getOrCreateDecorationType({
+  backgroundColor: isThemeLight()
+    ? "rgba(173, 216, 230, 0.3)"
+    : "rgba(135, 206, 250, 0.3)",
+});
+
 export async function handleJupyterFile(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
   decorationMap.clear();
   buttonsHTML.clear();
-  // Initialize highlightDecorationType and store it in globals
-  globals.highlightDecorationType = getOrCreateDecorationType({
-    backgroundColor: isThemeLight()
-      ? "rgba(173, 216, 230, 0.3)"
-      : "rgba(135, 206, 250, 0.3)",
-  });
-  console.log(
-    `highlightdecorationtype : ${globals.highlightDecorationType === undefined}`
-  );
   // Show a confirmation dialog
   const confirmAnalysis = await vscode.window.showInformationMessage(
     "Do you want to analyze your code for leakage ?",
@@ -98,11 +85,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "antileak-ml.highlightLine",
       (line1: number, line2: number) => {
-        console.log("command called");
-
-        vscode.window.showInformationMessage(
-          `line 1 : ${line1}, line 2 : ${line2}`
-        );
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
           return;
@@ -131,11 +113,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         const cell2 = vscode.window.activeNotebookEditor?.notebook.cellAt(
           mapping2.notebookCellNumber
         );
-
-        vscode.window.showErrorMessage(
-          `cells : ${mapping1.notebookCellNumber}, ${mapping2.notebookCellNumber}`
-        );
-
         if (!cell1 || !cell2) {
           vscode.window.showErrorMessage(
             "Could not find the corresponding cells."
@@ -165,8 +142,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         // Keys to identify the lines
         const key1 = `${mapping1.htmlRowNumber}:${cellUri1}`;
         const key2 = `${mapping2.htmlRowNumber}:${cellUri2}`;
-        console.log(`key 1 : ${key1}`);
-        console.log(`key 2 : ${key2}`);
 
         // Check if the lines are already highlighted
         if (
@@ -176,7 +151,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
           // If the lines are already highlighted, remove the highlighting
           globals.highlightedLines.delete(key1);
           globals.highlightedLines.delete(key2);
-          editor.setDecorations(globals.highlightDecorationType, []); // Clear decorations
+          editor.setDecorations(highlightDecorationType, []); // Clear decorations
         } else {
           // Otherwise, apply the highlighting
           globals.highlightedLines.add(key1);
@@ -192,39 +167,19 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
 
           // Particular case because setDecorations resets other decorations of this decoration type
           if (cellTextEditor1 && cellTextEditor1 === cellTextEditor2) {
-            cellTextEditor1.setDecorations(globals.highlightDecorationType, [
+            cellTextEditor1.setDecorations(highlightDecorationType, [
               range1,
               range2,
             ]);
           } else if (cellTextEditor1) {
-            console.log("test1");
-            vscode.window.showInformationMessage("test1");
-            cellTextEditor1.setDecorations(globals.highlightDecorationType, [
-              range1,
-            ]);
+            cellTextEditor1.setDecorations(highlightDecorationType, [range1]);
           } else if (cellTextEditor2) {
-            console.log("test2");
-            vscode.window.showInformationMessage("test2");
-            cellTextEditor2.setDecorations(globals.highlightDecorationType, [
-              range2,
-            ]);
+            cellTextEditor2.setDecorations(highlightDecorationType, [range2]);
           }
         }
       }
     )
   );
-
-  function logHoverProviders() {
-    console.log(
-      "Current Hover Providers: ",
-      globals.registeredHoverProviders.size
-    );
-    for (const [key, hoverProvider] of globals.registeredHoverProviders) {
-      console.log(
-        `Key: ${key}, Cell: ${hoverProvider.cell}, Range: ${hoverProvider.range}, Provider: ${hoverProvider.provider}`
-      );
-    }
-  }
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
@@ -239,9 +194,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
 
         // Proceed only if the user confirms
         if (confirmAnalysis === "Yes") {
-          // Reload the window
-          //await vscode.commands.executeCommand("workbench.action.reloadWindow");
-
           // Update diagnostics for the saved document
           updateDiagnostics(collection);
         }
@@ -262,9 +214,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
 
         // Proceed only if the user confirms
         if (confirmAnalysis === "Yes") {
-          // Reload the window
-          //await vscode.commands.executeCommand("workbench.action.reloadWindow");
-
           // Update diagnostics for the saved document
           updateDiagnostics(collection);
         }
@@ -299,11 +248,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
                 new vscode.Position(mapping.lineNumberInCell - 1, 100) // Arbitrary width for the range
               );
 
-              console.log(
-                "onclick in updateDecorations: ",
-                button.onclickValue
-              );
-
               // Call detection functions
               detectLeakage(
                 button.buttonText,
@@ -327,8 +271,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             }
           }
         }
-        // Log the current hover providers
-        logHoverProviders();
       });
 
       // If all buttons in the array have been processed, delete the array from the map
@@ -401,7 +343,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
                 editor.document.uri.toString() === cell?.document.uri.toString()
             );
             if (cellTextEditor) {
-              console.log("onclick in parseHTML: ", onclickValue);
               const range = new vscode.Range(
                 new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convertit le numéro de ligne en position 0-based
                 new vscode.Position(mapping.lineNumberInCell - 1, 100) // Largeur arbitraire pour l'intervalle
@@ -451,12 +392,12 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             }
           }
         } else {
-          console.log("pas de lineMapping");
+          console.log("Line Mappings undefined");
           vscode.window.showErrorMessage("Line Mappings undefined");
         }
       });
 
-      // Ajoute les diagnostics à la collection
+      // Add the diagnostics to the collection
       const fileUri = vscode.Uri.file(filePath);
       collection.set(fileUri, diagnostics);
 
@@ -466,7 +407,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
       // Retrieve the boolean value from global state (default to false if not set)
       let showResultsTable = context.globalState.get(SHOW_RESULTS_TABLE_KEY);
 
-      // Afficher la table dans un WebView
+      // Show the table in a WebView
       if (showResultsTable) {
         showHtmlInWebView(fullHtmlContent);
       }
@@ -484,7 +425,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
       const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
       const diagnosticMessage = buttonText;
 
-      // Définir les propriétés de la décoration
+      // Define the decoration properties
       const decorationProperties: vscode.DecorationRenderOptions = {
         after: {
           contentText: buttonText, // Texte du bouton
@@ -536,14 +477,10 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
 
     if (buttonText === "highlight train/test sites" && onclickValue) {
-      console.log("onclick in highlight: ", onclickValue);
       const match = onclickValue.match(/highlight_lines\(\[(\d+),\s*(\d+)\]\)/);
 
       if (match && cellTextEditor) {
         const [_, line1, line2] = match.map(Number);
-
-        console.log("lines in highlight: ", line1, " ", line2);
-        console.log(`cell : ${cellTextEditor.document.uri}`);
 
         // Define decoration properties
         const decorationProperties: vscode.DecorationRenderOptions = {
@@ -574,16 +511,11 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             cellTextEditor.document.uri,
             range
           );
-          console.log("range ici : ", range.start, "-", range.end);
 
           // Dispose of existing hover provider for this range if it exists
           const existingProvider =
             globals.registeredHoverProviders.get(providerkey);
-          // Log the current hover providers
-          logHoverProviders();
           if (existingProvider) {
-            console.log("removing provider", providerkey);
-            console.log("button : ", buttonText, onclickValue);
             existingProvider.provider.dispose();
             globals.registeredHoverProviders.delete(providerkey);
           }
@@ -619,19 +551,9 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             range,
             provider: hoverProvider,
           });
-          // Log the current hover providers
-          logHoverProviders();
         }
       }
     }
-  }
-
-  // Function to dispose all hover providers
-  function disposeAllHoverProviders() {
-    for (const [_, provider] of globals.registeredHoverProviders) {
-      provider.provider.dispose();
-    }
-    globals.registeredHoverProviders.clear();
   }
 
   async function runDockerContainer(
@@ -642,7 +564,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     const inputDir = path.dirname(filePath);
     const fileName = path.basename(filePath);
     const imageName = "nat2194/leakage-analysis:1.0";
-    const logFilePath = path.join(inputDir, "docker_logs.txt"); // Log file path
     const extension = path.extname(filePath);
     const newExtension = ".html";
 
@@ -666,13 +587,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
       });
 
       await container.start();
-
-      // Attach to the container stream
-      const stream = await container.logs({
-        follow: true,
-        stdout: true,
-        stderr: true,
-      });
 
       // Wait for the container to stop
       await container.wait();
@@ -906,13 +820,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
       (editor) => editor.document.uri.toString() === uriString
     );
 
-    console.log("Visible editor:", visibleEditor);
-
     if (visibleEditor) {
-      console.log("Applying decorations to visible editor:", visibleEditor);
-      console.log("Decoration type:", decorationType);
-      console.log("Range:", range);
-
       // Group decorations by type
       const decorationsByType = new Map<
         vscode.TextEditorDecorationType,
@@ -927,92 +835,36 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
 
       // Apply each decoration type with all its ranges
       decorationsByType.forEach((ranges, decType) => {
-        console.log("Applying decoration type:", decType);
-        console.log("Ranges:", ranges);
         visibleEditor.setDecorations(decType, ranges);
       });
     }
   }
+}
 
-  // Function to remove a specific decoration
-  function removeDecoration(
-    cellUri: vscode.Uri,
-    range: vscode.Range,
-    decorationType: vscode.TextEditorDecorationType
-  ) {
-    if (!cellUri) {
-      return;
-    }
-
-    const uriString = cellUri.toString();
-    const cellDecorations = decorationMap.get(uriString);
-
-    if (cellDecorations) {
-      // Filter out the specific decoration
-      const updatedDecorations = cellDecorations.filter(
-        (d) =>
-          !(
-            d.range.isEqual(range) &&
-            d.decorationType.key === decorationType.key
-          )
-      );
-
-      if (updatedDecorations.length === 0) {
-        decorationMap.delete(uriString);
-      } else {
-        decorationMap.set(uriString, updatedDecorations);
-      }
-
-      // Update visible editor
-      const visibleEditor = vscode.window.visibleTextEditors.find(
-        (editor) => editor.document.uri.toString() === uriString
-      );
-
-      if (visibleEditor) {
-        // Clear the specific decoration
-        visibleEditor.setDecorations(decorationType, []);
-
-        // Reapply remaining decorations
-        const decorationsByType = new Map<
-          vscode.TextEditorDecorationType,
-          vscode.Range[]
-        >();
-        updatedDecorations.forEach((decoration) => {
-          const ranges = decorationsByType.get(decoration.decorationType) || [];
-          ranges.push(decoration.range);
-          decorationsByType.set(decoration.decorationType, ranges);
-        });
-
-        decorationsByType.forEach((ranges, decType) => {
-          visibleEditor.setDecorations(decType, ranges);
-        });
-      }
-    }
+export function jupyterHandlerDeactivate() {
+  // Clean up decorations
+  for (const decorations of decorationMap.values()) {
+    decorations.forEach(({ decorationType }) => {
+      decorationType.dispose(); // Dispose of each decoration type
+    });
   }
+  decorationMap.clear(); // Clear the decoration map
 
-  // Function to clear all decorations for a cell
-  function clearCellDecorations(cellUri: vscode.Uri) {
-    if (!cellUri) {
-      return;
-    }
-
-    const uriString = cellUri.toString();
-    const cellDecorations = decorationMap.get(uriString);
-
-    if (cellDecorations) {
-      const visibleEditor = vscode.window.visibleTextEditors.find(
-        (editor) => editor.document.uri.toString() === uriString
-      );
-
-      if (visibleEditor) {
-        // Clear all decorations
-        cellDecorations.forEach((decoration) => {
-          visibleEditor.setDecorations(decoration.decorationType, []);
-        });
-      }
-
-      // Remove from map
-      decorationMap.delete(uriString);
-    }
+  // Clean up hover providers
+  for (const providerInfo of globals.registeredHoverProviders.values()) {
+    providerInfo.provider.dispose(); // Dispose of each hover provider
   }
+  globals.registeredHoverProviders.clear(); // Clear the hover providers map
+
+  // Clear highlighted lines
+  globals.highlightedLines.clear();
+
+  // Clear buttonsHTML map
+  buttonsHTML.clear();
+
+  // Clear diagnostics array
+  diagnostics.length = 0;
+
+  // Optionally, log a message indicating that the Jupyter handler has been deactivated
+  console.log("Jupyter handler has been deactivated.");
 }

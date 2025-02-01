@@ -1,10 +1,7 @@
 import * as vscode from "vscode";
-import { handlePythonFile } from "./pythonHandler";
-import { handleJupyterFile } from "./jupyterHandler";
+import { handlePythonFile, pythonHandlerDeactivate } from "./pythonHandler";
+import { handleJupyterFile, jupyterHandlerDeactivate } from "./jupyterHandler";
 import { globals } from "./globals";
-
-let dockerMemory: number | undefined;
-let dockerNanoCPUs: number | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection("docker");
@@ -121,4 +118,29 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 }
 
-export function deactivate() {}
+export function deactivate() {
+  // Clean up decorations
+  for (const decorationType of globals.decorationPropertiesMap.values()) {
+    decorationType.dispose();
+  }
+  globals.decorationPropertiesMap.clear();
+
+  // Clean up hover providers
+  for (const providerInfo of globals.registeredHoverProviders.values()) {
+    providerInfo.provider.dispose();
+  }
+  globals.registeredHoverProviders.clear();
+
+  // Clear highlighted lines
+  globals.highlightedLines.clear();
+
+  pythonHandlerDeactivate();
+
+  jupyterHandlerDeactivate();
+
+  // Log a message indicating that the extension has been deactivated
+  console.log("Antileak-ML extension has been deactivated.");
+
+  // Reload the window to ensure all decorations are removed
+  vscode.commands.executeCommand("workbench.action.reloadWindow");
+}
