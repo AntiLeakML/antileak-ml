@@ -53,47 +53,57 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "antileak-ml.highlightLine",
-      (line1: number, line2: number) => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-          return;
-        }
+  // Check if the command "test" already exists
+  const commandExists = vscode.commands.getCommands(true).then((commands) => {
+    return commands.includes("antileak-ml.highlightLine");
+  });
 
-        const range1 = new vscode.Range(
-          new vscode.Position(line1 - 1, 0),
-          new vscode.Position(line1 - 1, Number.MAX_SAFE_INTEGER)
-        );
+  commandExists.then((exists) => {
+    if (!exists) {
+      // Register the "highlightLine" command if it doesn't exist
+      context.subscriptions.push(
+        vscode.commands.registerCommand(
+          "antileak-ml.highlightLine",
+          (line1: number, line2: number) => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+              return;
+            }
 
-        const range2 = new vscode.Range(
-          new vscode.Position(line2 - 1, 0),
-          new vscode.Position(line2 - 1, Number.MAX_SAFE_INTEGER)
-        );
+            const range1 = new vscode.Range(
+              new vscode.Position(line1 - 1, 0),
+              new vscode.Position(line1 - 1, Number.MAX_SAFE_INTEGER)
+            );
 
-        // Clés pour identifier les lignes
-        const key1 = `${line1}:${editor.document.uri.toString()}`;
-        const key2 = `${line2}:${editor.document.uri.toString()}`;
+            const range2 = new vscode.Range(
+              new vscode.Position(line2 - 1, 0),
+              new vscode.Position(line2 - 1, Number.MAX_SAFE_INTEGER)
+            );
 
-        // Vérifie si les lignes sont déjà surlignées
-        if (
-          globals.highlightedLines.has(key1) &&
-          globals.highlightedLines.has(key2)
-        ) {
-          // Si les lignes sont déjà surlignées, retirer le surlignage
-          globals.highlightedLines.delete(key1);
-          globals.highlightedLines.delete(key2);
-          editor.setDecorations(highlightDecorationType, []);
-        } else {
-          // Sinon, appliquer le surlignage
-          globals.highlightedLines.add(key1);
-          globals.highlightedLines.add(key2);
-          editor.setDecorations(highlightDecorationType, [range1, range2]);
-        }
-      }
-    )
-  );
+            // Clés pour identifier les lignes
+            const key1 = `${line1}:${editor.document.uri.toString()}`;
+            const key2 = `${line2}:${editor.document.uri.toString()}`;
+
+            // Vérifie si les lignes sont déjà surlignées
+            if (
+              globals.highlightedLines.has(key1) &&
+              globals.highlightedLines.has(key2)
+            ) {
+              // Si les lignes sont déjà surlignées, retirer le surlignage
+              globals.highlightedLines.delete(key1);
+              globals.highlightedLines.delete(key2);
+              editor.setDecorations(highlightDecorationType, []);
+            } else {
+              // Sinon, appliquer le surlignage
+              globals.highlightedLines.add(key1);
+              globals.highlightedLines.add(key2);
+              editor.setDecorations(highlightDecorationType, [range1, range2]);
+            }
+          }
+        )
+      );
+    }
+  });
 
   async function runDockerContainer(
     filePath: string,

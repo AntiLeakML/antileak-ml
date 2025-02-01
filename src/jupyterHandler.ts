@@ -42,7 +42,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
   const confirmAnalysis = await vscode.window.showInformationMessage(
     "Do you want to analyze your code for leakage ?",
     { modal: true },
-    "Yes",
+    "Yes"
   );
 
   // Listen for visible text editors (including notebook cells)
@@ -80,105 +80,119 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     updateDiagnostics(collection);
   }
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "antileak-ml.highlightLine",
-      (line1: number, line2: number) => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-          return;
-        }
+  // Check if the command "test" already exists
+  const commandExists = vscode.commands.getCommands(true).then((commands) => {
+    return commands.includes("antileak-ml.highlightLine");
+  });
 
-        // Convert the given lines to cell URIs and line numbers within the cells
-        const mapping1 = lineMappings?.find(
-          (map: jupyterNotebookParser.NotebookLineMapping) =>
-            map.htmlRowNumber === line1
-        );
-        const mapping2 = lineMappings?.find(
-          (map: jupyterNotebookParser.NotebookLineMapping) =>
-            map.htmlRowNumber === line2
-        );
+  commandExists.then((exists) => {
+    if (!exists) {
+      // Register the "highlightLine" command if it doesn't exist
+      context.subscriptions.push(
+        vscode.commands.registerCommand(
+          "antileak-ml.highlightLine",
+          (line1: number, line2: number) => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+              return;
+            }
 
-        if (!mapping1 || !mapping2) {
-          vscode.window.showErrorMessage(
-            "Could not find line mappings for the given lines."
-          );
-          return;
-        }
+            // Convert the given lines to cell URIs and line numbers within the cells
+            const mapping1 = lineMappings?.find(
+              (map: jupyterNotebookParser.NotebookLineMapping) =>
+                map.htmlRowNumber === line1
+            );
+            const mapping2 = lineMappings?.find(
+              (map: jupyterNotebookParser.NotebookLineMapping) =>
+                map.htmlRowNumber === line2
+            );
 
-        const cell1 = vscode.window.activeNotebookEditor?.notebook.cellAt(
-          mapping1.notebookCellNumber
-        );
-        const cell2 = vscode.window.activeNotebookEditor?.notebook.cellAt(
-          mapping2.notebookCellNumber
-        );
-        if (!cell1 || !cell2) {
-          vscode.window.showErrorMessage(
-            "Could not find the corresponding cells."
-          );
-          return;
-        }
+            if (!mapping1 || !mapping2) {
+              vscode.window.showErrorMessage(
+                "Could not find line mappings for the given lines."
+              );
+              return;
+            }
 
-        const cellUri1 = cell1.document.uri.toString();
-        const cellUri2 = cell2.document.uri.toString();
+            const cell1 = vscode.window.activeNotebookEditor?.notebook.cellAt(
+              mapping1.notebookCellNumber
+            );
+            const cell2 = vscode.window.activeNotebookEditor?.notebook.cellAt(
+              mapping2.notebookCellNumber
+            );
+            if (!cell1 || !cell2) {
+              vscode.window.showErrorMessage(
+                "Could not find the corresponding cells."
+              );
+              return;
+            }
 
-        const range1 = new vscode.Range(
-          new vscode.Position(mapping1.lineNumberInCell - 1, 0), // Convert line number to 0-based position
-          new vscode.Position(
-            mapping1.lineNumberInCell - 1,
-            Number.MAX_SAFE_INTEGER
-          )
-        );
+            const cellUri1 = cell1.document.uri.toString();
+            const cellUri2 = cell2.document.uri.toString();
 
-        const range2 = new vscode.Range(
-          new vscode.Position(mapping2.lineNumberInCell - 1, 0), // Convert line number to 0-based position
-          new vscode.Position(
-            mapping2.lineNumberInCell - 1,
-            Number.MAX_SAFE_INTEGER
-          )
-        );
+            const range1 = new vscode.Range(
+              new vscode.Position(mapping1.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+              new vscode.Position(
+                mapping1.lineNumberInCell - 1,
+                Number.MAX_SAFE_INTEGER
+              )
+            );
 
-        // Keys to identify the lines
-        const key1 = `${mapping1.htmlRowNumber}:${cellUri1}`;
-        const key2 = `${mapping2.htmlRowNumber}:${cellUri2}`;
+            const range2 = new vscode.Range(
+              new vscode.Position(mapping2.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+              new vscode.Position(
+                mapping2.lineNumberInCell - 1,
+                Number.MAX_SAFE_INTEGER
+              )
+            );
 
-        // Check if the lines are already highlighted
-        if (
-          globals.highlightedLines.has(key1) &&
-          globals.highlightedLines.has(key2)
-        ) {
-          // If the lines are already highlighted, remove the highlighting
-          globals.highlightedLines.delete(key1);
-          globals.highlightedLines.delete(key2);
-          editor.setDecorations(highlightDecorationType, []); // Clear decorations
-        } else {
-          // Otherwise, apply the highlighting
-          globals.highlightedLines.add(key1);
-          globals.highlightedLines.add(key2);
+            // Keys to identify the lines
+            const key1 = `${mapping1.htmlRowNumber}:${cellUri1}`;
+            const key2 = `${mapping2.htmlRowNumber}:${cellUri2}`;
 
-          // Apply decorations to the correct cells
-          const cellTextEditor1 = vscode.window.visibleTextEditors.find(
-            (editor) => editor.document.uri.toString() === cellUri1
-          );
-          const cellTextEditor2 = vscode.window.visibleTextEditors.find(
-            (editor) => editor.document.uri.toString() === cellUri2
-          );
+            // Check if the lines are already highlighted
+            if (
+              globals.highlightedLines.has(key1) &&
+              globals.highlightedLines.has(key2)
+            ) {
+              // If the lines are already highlighted, remove the highlighting
+              globals.highlightedLines.delete(key1);
+              globals.highlightedLines.delete(key2);
+              editor.setDecorations(highlightDecorationType, []); // Clear decorations
+            } else {
+              // Otherwise, apply the highlighting
+              globals.highlightedLines.add(key1);
+              globals.highlightedLines.add(key2);
 
-          // Particular case because setDecorations resets other decorations of this decoration type
-          if (cellTextEditor1 && cellTextEditor1 === cellTextEditor2) {
-            cellTextEditor1.setDecorations(highlightDecorationType, [
-              range1,
-              range2,
-            ]);
-          } else if (cellTextEditor1) {
-            cellTextEditor1.setDecorations(highlightDecorationType, [range1]);
-          } else if (cellTextEditor2) {
-            cellTextEditor2.setDecorations(highlightDecorationType, [range2]);
+              // Apply decorations to the correct cells
+              const cellTextEditor1 = vscode.window.visibleTextEditors.find(
+                (editor) => editor.document.uri.toString() === cellUri1
+              );
+              const cellTextEditor2 = vscode.window.visibleTextEditors.find(
+                (editor) => editor.document.uri.toString() === cellUri2
+              );
+
+              // Particular case because setDecorations resets other decorations of this decoration type
+              if (cellTextEditor1 && cellTextEditor1 === cellTextEditor2) {
+                cellTextEditor1.setDecorations(highlightDecorationType, [
+                  range1,
+                  range2,
+                ]);
+              } else if (cellTextEditor1) {
+                cellTextEditor1.setDecorations(highlightDecorationType, [
+                  range1,
+                ]);
+              } else if (cellTextEditor2) {
+                cellTextEditor2.setDecorations(highlightDecorationType, [
+                  range2,
+                ]);
+              }
+            }
           }
-        }
-      }
-    )
-  );
+        )
+      );
+    }
+  });
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
