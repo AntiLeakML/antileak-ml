@@ -1,71 +1,148 @@
-# antileak-ml README
+# Antileak-ML - VS Code Extension
 
-This is the README for your extension "antileak-ml". After writing up a brief description, we recommend including the following sections.
-
-## Features
-
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+**Antileak-ML** is a Visual Studio Code extension designed to help developers detect and prevent data leakage in Python scripts and Jupyter Notebooks. It analyzes your code for potential data leakage issues and provides visual feedback directly in the editor, making it easier to identify and fix problems.
 
 ---
 
-## Following extension guidelines
+## Features
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+- **Data Leakage Detection**: Automatically analyzes Python scripts and Jupyter Notebooks for data leakage issues.
+- **Visual Feedback**: Highlights problematic lines in the code and provides diagnostic messages.
+- **Interactive Results**: Displays a summary table of detected leakage issues in a new panel.
+- **Docker Integration**: Uses a Docker container to perform the analysis, ensuring consistent and isolated execution as well as compatibility on all Operating Systems.
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+---
 
-## Working with Markdown
+## Requirements
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+Before using the **Antileak-ML** extension, ensure you have the following installed:
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+1. **Visual Studio Code**: The extension is designed for use with VS Code. Download it from [here](https://code.visualstudio.com/).
+2. **Docker**: The extension relies on Docker to run the analysis. Install Docker from [here](https://www.docker.com/).
+   - Ensure Docker is running before using the extension.
+3. **Python**: The extension is designed for Python scripts and Jupyter Notebooks. Trying to run an analysis on other files won't work.
+4. **Jupyter Notebook Support**: If analyzing Jupyter Notebooks, ensure the Jupyter extension is installed in VS Code.
 
-## For more information
+---
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+## Installation
 
-**Enjoy!**
+1. Open **Visual Studio Code**.
+2. Go to the **Extensions** view by clicking on the Extensions icon in the Activity Bar on the side of the window or by pressing `Ctrl+Shift+X`.
+3. Search for **Antileak-ML**.
+4. Click **Install** to install the extension.
+
+---
+
+## Usage
+
+### Running the Analysis
+
+1. **Open a Python Script or Jupyter Notebook**:
+
+   - Open a `.py` file or `.ipynb` file in VS Code.
+
+2. **Run the Analysis**:
+
+   - Click the **Run Analysis** button in the status bar (bottom-left corner of the editor). if you are trying to analyze a notebook, you may need to select a code cell for the button to appear.
+   - Or, use the shortcut `Ctrl+Alt+A`.
+   - Alternatively, use the command palette (`Ctrl+Shift+P`) and search for:
+     - `Antileak-ML: Run Python Analysis` for Python scripts.
+     - `Antileak-ML: Run Notebook Analysis` for Jupyter Notebooks.
+
+3. **Confirm the Analysis**:
+
+   - A confirmation dialog will appear. Click **Yes** to proceed with the analysis.
+
+4. **View the Results**:
+   - The extension will analyze the file and highlight problematic lines in the editor.
+   - A summary table of detected leakage issues will be displayed in a WebView panel (if enabled).
+
+### Toggling the Results Table
+
+- To toggle the visibility of the results table, use the command palette (`Ctrl+Shift+P`) and search for:
+  - `Antileak-ML: Toggle Results Table`.
+
+### Highlighting Lines
+
+- The extension allows you to highlight specific lines in the code. Click on the highlighted lines to toggle the highlighting. This allows you to detect training/test data couples in order to understand more your data flows.
+
+---
+
+## Configuration
+
+The extension provides the following configuration option:
+
+1. **Show Results Table**:
+
+   - Toggle the visibility of the results table using the `Antileak-ML: Toggle Results Table` command.
+   - The state is saved in the global user settings.
+
+---
+
+## How It Works
+
+1. **Docker Container**:
+
+   - The extension uses a Docker container (`nat2194/leakage-analysis:1.0`) to perform the analysis.
+   - The container runs a script that analyzes the Python or Jupyter Notebook file and generates an HTML report.
+
+2. **HTML Parsing**:
+
+   - The extension parses the generated HTML report to extract diagnostic information and display it in the editor.
+
+3. **Decorations and Diagnostics**:
+   - The extension applies decorations to problematic lines and displays diagnostic messages in the Problems panel.
+
+---
+
+## Troubleshooting
+
+### Docker Not Running
+
+- If you encounter an error related to Docker not running, ensure Docker is installed and running on your system.
+- Restart Docker and try running the analysis again.
+
+### Analysis Fails
+
+- If the analysis fails, check the console logs for more information.
+- Ensure the file you are analyzing is valid and does not contain syntax errors.
+
+### Extension Not Working
+
+- Ensure the extension is properly installed and enabled in VS Code.
+- Restart VS Code if the extension does not respond.
+
+---
+
+## Context and Credits
+
+This extension is based on the work of the following static analysis tool to detect test data leakage in Python notebooks : [GitHub repository](https://github.com/malusamayo/leakage-analysis).
+This tool itself is based on the ASE'22 paper: [Data Leakage in Notebooks: Static Detection and Better Processes](https://www.cs.cmu.edu/~cyang3/papers/ase22.pdf).
+You can find our own version of the tool, including our Dockerfile to reproduce the Docker image on this [GitHub repository](https://github.com/Nat2194/leakage-analysis).
+
+The Source Code of this extension is available on this [GitHub repository](https://github.com/Nat2194/antileak-ml).
+
+---
+
+## License
+
+To be added
+
+---
+
+## Dependances
+
+- **Dockerode**: The extension relies on Docker for isolated and consistent analysis.
+- **VS Code API**: The extension uses the VS Code API for integrating with the editor.
+- **Cheerio**: Used for parsing HTML reports generated by the analysis tool.
+
+---
+
+## Contact
+
+For questions, feedback, or support, please open an issue on the [GitHub repository](https://github.com/Nat2194/antileak-ml).
+
+---
+
+Enjoy using **Antileak-ML** to detect and prevent data leakage in your Python and Jupyter projects! 🚀

@@ -27,8 +27,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       const confirmAnalysis = await vscode.window.showInformationMessage(
         "Do you want to analyze your code for leakage ?",
         { modal: true },
-        "Yes",
-        "No"
+        "Yes"
       );
 
       // Proceed only if the user confirms

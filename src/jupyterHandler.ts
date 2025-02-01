@@ -43,7 +43,6 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     "Do you want to analyze your code for leakage ?",
     { modal: true },
     "Yes",
-    "No"
   );
 
   // Listen for visible text editors (including notebook cells)
