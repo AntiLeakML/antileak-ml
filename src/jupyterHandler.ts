@@ -12,8 +12,10 @@ import {
 } from "./globals";
 import * as jupyterNotebookParser from "./components/jupyterNotebookParser";
 
+// Map to store decorations for each cell URI
 const decorationMap = new Map<string, StoredDecoration[]>();
 
+// Map to store HTML buttons and their associated metadata
 const buttonsHTML = new Map<
   string,
   Array<{
@@ -24,32 +26,41 @@ const buttonsHTML = new Map<
   }>
 >();
 
+// Array to store diagnostics (e.g., errors, warnings)
 const diagnostics: vscode.Diagnostic[] = [];
 
+// Variable to store line mappings between notebook cells and HTML rows
 let lineMappings: jupyterNotebookParser.NotebookLineMapping[] | undefined;
 
+// Define a decoration type for highlighting lines
 const highlightDecorationType = getOrCreateDecorationType({
   backgroundColor: isThemeLight()
     ? "rgba(173, 216, 230, 0.3)"
     : "rgba(135, 206, 250, 0.3)",
 });
 
+// Function to handle Jupyter file analysis
 export async function handleJupyterFile(context: vscode.ExtensionContext) {
+  // Create a diagnostic collection for Docker-related issues
   const collection = vscode.languages.createDiagnosticCollection("docker");
+
+  // Clear existing decorations and buttons
   decorationMap.clear();
   buttonsHTML.clear();
-  // Show a confirmation dialog
+
+  // Show a confirmation dialog to the user
   const confirmAnalysis = await vscode.window.showInformationMessage(
-    "Do you want to analyze your code for leakage ?",
+    "Do you want to analyze your code for leakage?",
     { modal: true },
     "Yes"
   );
 
-  // Listen for visible text editors (including notebook cells)
+  // Listen for changes in visible text editors (including notebook cells)
   context.subscriptions.push(
     vscode.window.onDidChangeVisibleTextEditors((visibleEditors) => {
       for (const textEditor of visibleEditors) {
         if (textEditor.document.uri.scheme === "vscode-notebook-cell") {
+          // Update decorations for the visible editor
           updateDecorations(diagnostics);
           const cellUri = textEditor.document.uri.toString();
           const decorations = decorationMap.get(cellUri) || [];
@@ -65,7 +76,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             decorationsByType.set(decorationType, [...existingRanges, range]);
           });
 
-          // Reapply ALL stored decorations for this cell, preserving existing ranges for each type
+          // Reapply all stored decorations for this cell
           decorationsByType.forEach((ranges, decorationType) => {
             textEditor.setDecorations(decorationType, ranges);
           });
@@ -74,13 +85,13 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     })
   );
 
-  // Proceed only if the user confirms
+  // Proceed with analysis only if the user confirms
   if (confirmAnalysis === "Yes") {
     // Update diagnostics for the saved document
     updateDiagnostics(collection);
   }
 
-  // Check if the command "test" already exists
+  // Check if the "highlightLine" command already exists
   const commandExists = vscode.commands.getCommands(true).then((commands) => {
     return commands.includes("antileak-ml.highlightLine");
   });
@@ -97,7 +108,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
               return;
             }
 
-            // Convert the given lines to cell URIs and line numbers within the cells
+            // Find the line mappings for the given lines
             const mapping1 = lineMappings?.find(
               (map: jupyterNotebookParser.NotebookLineMapping) =>
                 map.htmlRowNumber === line1
@@ -114,6 +125,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
               return;
             }
 
+            // Get the corresponding notebook cells
             const cell1 = vscode.window.activeNotebookEditor?.notebook.cellAt(
               mapping1.notebookCellNumber
             );
@@ -127,11 +139,13 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
               return;
             }
 
+            // Get the URIs of the cells
             const cellUri1 = cell1.document.uri.toString();
             const cellUri2 = cell2.document.uri.toString();
 
+            // Define ranges for the lines to highlight
             const range1 = new vscode.Range(
-              new vscode.Position(mapping1.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+              new vscode.Position(mapping1.lineNumberInCell - 1, 0), // Convert to 0-based position
               new vscode.Position(
                 mapping1.lineNumberInCell - 1,
                 Number.MAX_SAFE_INTEGER
@@ -139,14 +153,14 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             );
 
             const range2 = new vscode.Range(
-              new vscode.Position(mapping2.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+              new vscode.Position(mapping2.lineNumberInCell - 1, 0), // Convert to 0-based position
               new vscode.Position(
                 mapping2.lineNumberInCell - 1,
                 Number.MAX_SAFE_INTEGER
               )
             );
 
-            // Keys to identify the lines
+            // Create unique keys for the highlighted lines
             const key1 = `${mapping1.htmlRowNumber}:${cellUri1}`;
             const key2 = `${mapping2.htmlRowNumber}:${cellUri2}`;
 
@@ -155,22 +169,24 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
               globals.highlightedLines.has(key1) &&
               globals.highlightedLines.has(key2)
             ) {
-              // If the lines are already highlighted, remove the highlighting
+              // Remove highlighting if already applied
               globals.highlightedLines.delete(key1);
               globals.highlightedLines.delete(key2);
               editor.setDecorations(highlightDecorationType, []); // Clear decorations
             } else {
-              // Otherwise, apply the highlighting
+              // Apply highlighting if not already applied
               globals.highlightedLines.add(key1);
               globals.highlightedLines.add(key2);
 
-              // Apply decorations to the correct cells
+              // Find the text editors for the cells
               const cellTextEditor1 = vscode.window.visibleTextEditors.find(
                 (editor) => editor.document.uri.toString() === cellUri1
               );
               const cellTextEditor2 = vscode.window.visibleTextEditors.find(
                 (editor) => editor.document.uri.toString() === cellUri2
               );
+
+              // Apply decorations to the correct cells
 
               // Particular case because setDecorations resets other decorations of this decoration type
               if (cellTextEditor1 && cellTextEditor1 === cellTextEditor2) {
@@ -194,12 +210,13 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   });
 
+  // Listen for text document save events
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
       if (document && document.languageId === "python") {
         // Show a confirmation dialog
         const confirmAnalysis = await vscode.window.showInformationMessage(
-          "Do you want to analyze your code for leakage ?",
+          "Do you want to analyze your code for leakage?",
           { modal: true },
           "Yes",
           "No"
@@ -214,12 +231,13 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     })
   );
 
+  // Listen for notebook document save events
   context.subscriptions.push(
     vscode.workspace.onDidSaveNotebookDocument(async (notebook) => {
       if (notebook && notebook.notebookType === "jupyter-notebook") {
         // Show a confirmation dialog
         const confirmAnalysis = await vscode.window.showInformationMessage(
-          "Do you want to analyze your code for leakage ?",
+          "Do you want to analyze your code for leakage?",
           { modal: true },
           "Yes",
           "No"
@@ -234,30 +252,33 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     })
   );
 
+  // Function to update decorations based on diagnostics
   function updateDecorations(diagnostics: vscode.Diagnostic[]) {
     buttonsHTML.forEach((buttons, key) => {
-      // Track the key for each buttons array
       // Create a copy of the buttons array to avoid modifying it while iterating
       const buttonsCopy = [...buttons];
 
       buttonsCopy.forEach((button) => {
         if (lineMappings) {
+          // Find the correspondance between the HTML output and the notebook editor for the button
           const mapping = lineMappings.find(
             (map: jupyterNotebookParser.NotebookLineMapping) =>
               map.htmlRowNumber === button.mapping.htmlRowNumber
           );
           if (mapping) {
+            // Get the corresponding notebook cell
             const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
               mapping.notebookCellNumber
             );
-            // Find the TextEditor for this cell's document (imperfect because we can only iterate through the visible ones)
+            // Find the text editor for this cell's document
             const cellTextEditor = vscode.window.visibleTextEditors.find(
               (editor) =>
                 editor.document.uri.toString() === cell?.document.uri.toString()
             );
             if (cellTextEditor) {
+              // Define the range for the decoration
               const range = new vscode.Range(
-                new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convert line number to 0-based position
+                new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convert to 0-based position
                 new vscode.Position(mapping.lineNumberInCell - 1, 100) // Arbitrary width for the range
               );
 
@@ -276,7 +297,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
                 range,
                 diagnostics
               );
-              // Delete the button from the original buttons array
+              // Remove the button from the original buttons array
               const index = buttons.indexOf(button);
               if (index !== -1) {
                 buttons.splice(index, 1);
@@ -293,7 +314,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     });
   }
 
-  // Function to generate a composite key
+  // Function to generate a composite key for buttons
   function getCompositeKey(
     htmlRowNumber: number,
     buttonText: string,
@@ -302,7 +323,8 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     return `${htmlRowNumber}-${buttonText}-${backgroundColor}`;
   }
 
-  async function parseHtmlForDiagnostics(
+  // Function to parse the HTML output to generate diagnostics and decorations
+  async function parseHtmlOutput(
     htmlPath: string,
     filePath: string,
     collection: vscode.DiagnosticCollection
@@ -310,15 +332,17 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     const htmlContent = fs.readFileSync(htmlPath, "utf8");
     const $ = cheerio.load(htmlContent);
 
+    // Find the correspondances between the HTML output and the notebook editor and put them in a map
     lineMappings = await jupyterNotebookParser.mapNotebookHTML(htmlPath);
 
-    // Appelle parseSumTable pour analyser la table .sum
+    // Parse the sum table from the HTML output
     parseSumTable($, diagnostics);
-    // Recherche la table de classe "sum"
+
+    // Find the sum table in the HTML
     const sumTable = $("table.sum").html();
 
     if (sumTable) {
-      // Générer le code HTML pour l'inclure dans le WebView
+      // Generate HTML content for the WebView
       const fullHtmlContent = `
             <html>
               <body>
@@ -330,38 +354,40 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             </html>
           `;
 
-      // Parcours de tous les boutons
+      // Iterate over all buttons in the HTML
       $("button").each((index, element) => {
-        const buttonText = $(element).text().trim(); // Texte du bouton
-        const onclickValue = $(element).attr("onclick"); // Valeur de l'attribut onclick
-        // Vérifie la couleur de fond du bouton
-        const backgroundColor = $(element).css("background-color");
+        const buttonText = $(element).text().trim(); // Button text
+        const onclickValue = $(element).attr("onclick"); // Onclick attribute value
+        const backgroundColor = $(element).css("background-color"); // Background color
 
-        // Cherche le span avec un attribut id qui contient le numéro de ligne
+        // Find the span with the line number
         const lineNumberSpan = $(element).prevAll("span[id]").first();
         const lineNumber = parseInt(lineNumberSpan.attr("id") || "0", 10);
 
         if (lineMappings) {
+          // Find the line mapping for the button
           const mapping = lineMappings.find(
             (map: jupyterNotebookParser.NotebookLineMapping) =>
               map.htmlRowNumber === lineNumber
           );
           if (mapping) {
+            // Get the corresponding notebook cell
             const cell = vscode.window.activeNotebookEditor?.notebook.cellAt(
               mapping.notebookCellNumber
             );
-            // Find the TextEditor for this cell's document (imperfect because we can only iterate through the visible ones)
+            // Find the text editor for this cell's document
             const cellTextEditor = vscode.window.visibleTextEditors.find(
               (editor) =>
                 editor.document.uri.toString() === cell?.document.uri.toString()
             );
             if (cellTextEditor) {
+              // Define the range for the decoration
               const range = new vscode.Range(
-                new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convertit le numéro de ligne en position 0-based
-                new vscode.Position(mapping.lineNumberInCell - 1, 100) // Largeur arbitraire pour l'intervalle
+                new vscode.Position(mapping.lineNumberInCell - 1, 0), // Convert to 0-based position
+                new vscode.Position(mapping.lineNumberInCell - 1, 100) // Arbitrary width for the range
               );
 
-              // Appelle les fonctions de détection
+              // Call detection functions
               detectLeakage(
                 buttonText,
                 backgroundColor,
@@ -377,6 +403,10 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
                 diagnostics
               );
             } else {
+              // Store the button in the buttonsHTML map if the cell text editor is not found
+              // VS Code API currently does not have any built-in method to find all text editors in a file
+              // Each notebook cell is considered a unique text editor, so we cannot find all the cells at once
+              // We store the buttons in an array to be able to parse them when the corresponding cell is displayed on screen
               const existing =
                 buttonsHTML.get(
                   getCompositeKey(
@@ -414,19 +444,19 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
       const fileUri = vscode.Uri.file(filePath);
       collection.set(fileUri, diagnostics);
 
-      // Define a key for the global boolean variable
-      const SHOW_RESULTS_TABLE_KEY = "antileak-ml.showResultsTable";
+      // Retrieve the boolean value from global state
+      let showResultsTable = context.globalState.get(
+        "antileak-ml.showResultsTable"
+      );
 
-      // Retrieve the boolean value from global state (default to false if not set)
-      let showResultsTable = context.globalState.get(SHOW_RESULTS_TABLE_KEY);
-
-      // Show the table in a WebView
+      // Show the table in a WebView if the setting is enabled
       if (showResultsTable) {
         showHtmlInWebView(fullHtmlContent);
       }
     }
   }
 
+  // Function to detect leakage based on button text and background color
   function detectLeakage(
     buttonText: string,
     backgroundColor: string | undefined,
@@ -435,24 +465,24 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     diagnostics: vscode.Diagnostic[]
   ) {
     if (backgroundColor === "red") {
-      const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Niveau de gravité pour les erreurs
+      const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Severity level for errors
       const diagnosticMessage = buttonText;
 
-      // Define the decoration properties
+      // Define decoration properties
       const decorationProperties: vscode.DecorationRenderOptions = {
         after: {
-          contentText: buttonText, // Texte du bouton
-          backgroundColor: "red", // Couleur de fond rouge
-          color: "white", // Couleur du texte
-          margin: "0 10px 0 10px", // Espacement
+          contentText: buttonText, // Button text
+          backgroundColor: "red", // Red background
+          color: "white", // White text
+          margin: "0 10px 0 10px", // Spacing
         },
-        borderRadius: "5px", // Arrondi des coins
-        cursor: "pointer", // Apparence du curseur
+        borderRadius: "5px", // Rounded corners
+        cursor: "pointer", // Pointer cursor
       };
 
-      // Obtenir ou créer le decorationType
+      // Get or create the decoration type
       const decorationType = getOrCreateDecorationType(decorationProperties);
-      // Ajoute la décoration
+      // Apply the decoration to the cell
       if (cellTextEditor) {
         applyDecorationToCell(
           cellTextEditor.document.uri,
@@ -461,7 +491,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         );
       }
 
-      // Ajoute le diagnostic
+      // Add the diagnostic
       const diagnostic = new vscode.Diagnostic(
         range,
         diagnosticMessage,
@@ -471,6 +501,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to highlight train/test sites based on button text and onclick value
   function highlightTrainTestSites(
     buttonText: string,
     onclickValue: string | undefined,
@@ -479,7 +510,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     diagnostics: vscode.Diagnostic[]
   ) {
     if (buttonText === "train" || buttonText === "test") {
-      // Add informative diagnostic
+      // Add an informative diagnostic
       const diagnosticMessage = `${buttonText} data`;
       const diagnostic = new vscode.Diagnostic(
         range,
@@ -508,10 +539,10 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
           cursor: "pointer",
         };
 
-        // Get or create decorationType
+        // Get or create the decoration type
         const decorationType = getOrCreateDecorationType(decorationProperties);
 
-        // Add decoration
+        // Apply the decoration to the cell
         if (cellTextEditor) {
           applyDecorationToCell(
             cellTextEditor.document.uri,
@@ -533,7 +564,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
             globals.registeredHoverProviders.delete(providerkey);
           }
 
-          // Register new hover provider
+          // Register a new hover provider
           const hoverProvider = vscode.languages.registerHoverProvider(
             {
               scheme: cellTextEditor.document.uri.scheme,
@@ -569,6 +600,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to run a Docker container for analysis
   async function runDockerContainer(
     filePath: string,
     collection: vscode.DiagnosticCollection
@@ -621,13 +653,12 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         console.error(`Failed to remove container: ${removeErrorMessage}`);
       }
 
-      await parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
+      // Parse the HTML output for diagnostics
+      await parseHtmlOutput(htmlOutputPath, filePath, collection);
 
-      // Appeler cleanup pour supprimer le fichier HTML
+      // Clean up the generated HTML file
       cleanup(htmlOutputPath);
     } catch (err) {
-      // Message to remind to start docker if a 500 error is caught
-
       const errorMessage = err instanceof Error ? err.message : String(err);
 
       // Check if the error is due to Docker not running
@@ -644,6 +675,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to parse the sum table for diagnostics
   function parseSumTable(
     $: cheerio.CheerioAPI,
     diagnostics: vscode.Diagnostic[]
@@ -653,7 +685,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     tableRows.each((index, row) => {
       const cells = $(row).find("td");
 
-      // Skip the header row (index 0)
+      // Skip the header row
       if (index === 0) {
         return;
       }
@@ -662,18 +694,18 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
       const detectedCount = $(cells[1]).text().trim();
       const locations = $(cells[2]).text().trim();
 
-      // Créer un message de diagnostic
+      // Create a diagnostic message
       const diagnosticMessage = `Leakage: ${leakageType}, Detected: ${detectedCount}, Locations: ${locations}`;
 
       vscode.window.showInformationMessage(diagnosticMessage);
 
-      // Définir la ligne de diagnostic
+      // Define the range for the diagnostic
       const range = new vscode.Range(
         new vscode.Position(index - 1, 0),
         new vscode.Position(index - 1, 100)
       );
 
-      // Ajouter un diagnostic d'information
+      // Add an informational diagnostic
       const diagnostic = new vscode.Diagnostic(
         range,
         diagnosticMessage,
@@ -684,24 +716,27 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     });
   }
 
+  // Function to show HTML content in a WebView (for the results table)
   function showHtmlInWebView(htmlContent: string) {
-    // Créer un panel de WebView
+    // Create a WebView panel
     const panel = vscode.window.createWebviewPanel(
-      "LeakageReport", // Identifiant unique pour le WebView
-      "Leakage Report", // Titre du panneau
-      vscode.ViewColumn.Two, // Position du WebView (dans la deuxième colonne de l'éditeur)
+      "LeakageReport", // Unique identifier for the WebView
+      "Leakage Report", // Panel title
+      vscode.ViewColumn.Two, // Position in the editor
       {
-        enableScripts: true, // Permet l'utilisation de scripts dans le WebView (facultatif)
+        enableScripts: true, // Allow scripts in the WebView
       }
     );
 
-    // Injecter le contenu HTML dans le WebView
+    // Inject the HTML content into the WebView
     panel.webview.html = htmlContent;
   }
 
+  // Function to update diagnostics
   function updateDiagnostics(collection: vscode.DiagnosticCollection): void {
     collection.clear();
     if (vscode.window.activeNotebookEditor) {
+      // Run the Docker container for analysis
       runDockerContainer(
         vscode.window.activeNotebookEditor.notebook.uri.fsPath,
         collection
@@ -711,17 +746,18 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to clean up generated files and directories
   function cleanup(filePath: string) {
     const dirPath = path.dirname(filePath);
 
     try {
-      // Supprimer le fichier HTML
+      // Delete the HTML file
       if (fs.existsSync(filePath)) {
-        //fs.unlinkSync(filePath);
+        fs.unlinkSync(filePath);
         console.log(`File ${filePath} has been deleted.`);
       }
 
-      // Supprimer les dossiers finissant par -fact
+      // Delete directories ending with "-fact"
       const factDirs = fs
         .readdirSync(dirPath)
         .filter(
@@ -733,7 +769,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         deleteFolderRecursive(path.join(dirPath, dir));
       }
 
-      // Supprimer les dossiers finissant par ip-fact
+      // Delete directories ending with "ip-fact"
       const ipFactDirs = fs
         .readdirSync(dirPath)
         .filter(
@@ -745,7 +781,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         deleteFolderRecursive(path.join(dirPath, dir));
       }
 
-      // Supprimer les fichiers finissant par .ir.py
+      // Delete files ending with ".ir.py"
       const irPyFiles = fs
         .readdirSync(dirPath)
         .filter((item) => item.endsWith(".ir.py"));
@@ -754,7 +790,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         console.log(`File ${file} has been deleted.`);
       }
 
-      // Supprimer les fichiers finissant par .py.json
+      // Delete files ending with ".py.json"
       const pyJsonFiles = fs
         .readdirSync(dirPath)
         .filter((item) => item.endsWith(".py.json"));
@@ -763,7 +799,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
         console.log(`File ${file} has been deleted.`);
       }
 
-      // Supprimer les fichiers finissant par .ipynb.json
+      // Delete files ending with ".ipynb.json"
       const ipynbJsonFiles = fs
         .readdirSync(dirPath)
         .filter((item) => item.endsWith(".ipynb.json"));
@@ -777,16 +813,16 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
-  // Fonction récursive pour supprimer un dossier et son contenu
+  // Recursive function to delete a folder and its contents
   function deleteFolderRecursive(folderPath: string) {
     if (fs.existsSync(folderPath)) {
       fs.readdirSync(folderPath).forEach((file) => {
         const curPath = path.join(folderPath, file);
         if (fs.lstatSync(curPath).isDirectory()) {
-          // Récursivement pour les sous-dossiers
+          // Recursively delete subdirectories
           deleteFolderRecursive(curPath);
         } else {
-          // Supprimer les fichiers
+          // Delete files
           fs.unlinkSync(curPath);
         }
       });
@@ -795,7 +831,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
-  // Helper to apply AND store decorations with their type
+  // Helper function to apply and store decorations with their type
   function applyDecorationToCell(
     cellUri: vscode.Uri,
     range: vscode.Range,
@@ -854,6 +890,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
   }
 }
 
+// Function to deactivate the Jupyter handler
 export function jupyterHandlerDeactivate() {
   // Clean up decorations
   for (const decorations of decorationMap.values()) {
@@ -878,6 +915,6 @@ export function jupyterHandlerDeactivate() {
   // Clear diagnostics array
   diagnostics.length = 0;
 
-  // Optionally, log a message indicating that the Jupyter handler has been deactivated
+  // Log a message indicating that the Jupyter handler has been deactivated
   console.log("Jupyter handler has been deactivated.");
 }

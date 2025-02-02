@@ -2,6 +2,17 @@
 
 **Antileak-ML** is a Visual Studio Code extension designed to help developers detect and prevent data leakage in Python scripts and Jupyter Notebooks. It analyzes your code for potential data leakage issues and provides visual feedback directly in the editor, making it easier to identify and fix problems.
 
+This is an engineering project realized by a team of engineering students at EFREI (École d'Ingénieurs Généraliste du Numérique).
+
+The team is composed of :
+
+    - Achraf BEN BACCAR
+    - Nathan CARLIER
+    - Danny GRAINE
+    - Thierno-Sadou DIALLO
+    - Léo PETIT
+    - Emerick SZONYI
+
 ---
 
 ## Features
@@ -127,7 +138,10 @@ The Source Code of this extension is available on this [GitHub repository](https
 
 ## License
 
-To be added
+MIT License
+
+Copyright (c) 2022 malusamayo
+Copyright (c) 2025 AntiLeakML EFREI
 
 ---
 
