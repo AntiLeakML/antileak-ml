@@ -3,6 +3,8 @@
   "displayName": "AntiLeak ML",
   "description": "Detection of overlapping and pre-processing data leakages that may occur in the Python code of machine learning projects",
   "version": "1.0.0",
+  "publisher": "AntiLeakMLEfrei",
+  "icon" : "src/logo.png",
   "engines": {
     "vscode": "^1.95.0"
   },

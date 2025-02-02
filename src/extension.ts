@@ -7,7 +7,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // Create a diagnostic collection for Docker-related issues
   const collection = vscode.languages.createDiagnosticCollection("docker");
 
-  // Déclarer les commandes
+  // Register the command to run Python file analysis
   const runAnalysisPython = vscode.commands.registerCommand(
     "antileak-ml.runAnalysisPython",
     () => {
@@ -15,6 +15,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Register the command to run Jupyter Notebook analysis
   const runAnalysisNotebook = vscode.commands.registerCommand(
     "antileak-ml.runAnalysisNotebook",
     () => {
@@ -22,13 +23,13 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Define a key for the global boolean variable
+  // Define a key for storing the global boolean variable in the extension's global state
   const SHOW_RESULTS_TABLE_KEY = "antileak-ml.showResultsTable";
 
   // Retrieve the boolean value from global state (default to false if not set)
   let showResultsTable = context.globalState.get(SHOW_RESULTS_TABLE_KEY, false);
 
-  // Command to toggle the boolean value
+  // Register the command to toggle the boolean value for showing/hiding the results table
   const toggleResultsTable = vscode.commands.registerCommand(
     "antileak-ml.toggleTable",
     () => {
@@ -38,65 +39,71 @@ export async function activate(context: vscode.ExtensionContext) {
       // Update the global state with the new value
       context.globalState.update(SHOW_RESULTS_TABLE_KEY, showResultsTable);
 
-      // Notify the user (optional)
+      // Notify the user about the change (optional)
       vscode.window.showInformationMessage(
         `Results table visibility is now: ${showResultsTable ? "ON" : "OFF"}`
       );
     }
   );
 
-  // Register the command
+  // Add the toggle command to the extension's subscriptions
   context.subscriptions.push(toggleResultsTable);
 
-  // Ajouter les commandes au contexte de l'extension
+  // Add the analysis commands to the extension's subscriptions
   context.subscriptions.push(runAnalysisPython, runAnalysisNotebook);
 
-  // Créer le bouton dans la barre d'état
+  // Create a status bar button for running analysis
   const statusBarButton = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Left,
     100
   );
-  statusBarButton.text = "$(file-code) Run Analysis"; // Texte et icône par défaut
+  statusBarButton.text = "$(file-code) Run Analysis"; // Default text and icon
   statusBarButton.tooltip = "Run analysis based on the current file type";
   context.subscriptions.push(statusBarButton);
 
-  // Fonction pour mettre à jour la commande et la visibilité du bouton
+  // Function to update the status bar button's command and visibility based on the active file
   function updateStatusBar() {
     const activeEditor = vscode.window.activeTextEditor;
 
     if (activeEditor) {
+      // Get the file extension of the active document
       const fileExtension = activeEditor.document.fileName.split(".").pop();
 
       if (fileExtension === "py") {
+        // Set the command and text for Python files
         statusBarButton.command = "antileak-ml.runAnalysisPython";
         statusBarButton.text = "$(python) Run Python Analysis";
         statusBarButton.tooltip =
           "Analyze your Python script for data leakages";
         statusBarButton.show();
       } else if (fileExtension === "ipynb") {
+        // Set the command and text for Jupyter Notebook files
         statusBarButton.command = "antileak-ml.runAnalysisNotebook";
         statusBarButton.text = "$(notebook) Run Notebook Analysis";
         statusBarButton.tooltip =
           "Analyze your Jupyter Notebook for data leakages";
         statusBarButton.show();
       } else {
-        statusBarButton.hide(); // Cacher si le fichier n'est ni .py ni .ipynb
+        // Hide the button if the file is neither .py nor .ipynb
+        statusBarButton.hide();
       }
     } else {
-      statusBarButton.hide(); // Cacher si aucun éditeur n'est actif
+      // Hide the button if no editor is active
+      statusBarButton.hide();
     }
   }
 
-  // Mettre à jour l'état du bouton à l'activation
+  // Update the status bar button when the extension is activated
   updateStatusBar();
 
-  // Mettre à jour le bouton lorsque l'utilisateur change d'éditeur
+  // Update the status bar button whenever the active text editor changes
   vscode.window.onDidChangeActiveTextEditor(
     updateStatusBar,
     null,
     context.subscriptions
   );
 
+  // Listen for file save events and trigger analysis based on the file type
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
       const fileExtension = document.fileName.split(".").pop();
@@ -121,28 +128,30 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  // Clean up decorations
+  // Clean up decorations used in the extension
   for (const decorationType of globals.decorationPropertiesMap.values()) {
     decorationType.dispose();
   }
   globals.decorationPropertiesMap.clear();
 
-  // Clean up hover providers
+  // Clean up hover providers registered by the extension
   for (const providerInfo of globals.registeredHoverProviders.values()) {
     providerInfo.provider.dispose();
   }
   globals.registeredHoverProviders.clear();
 
-  // Clear highlighted lines
+  // Clear any highlighted lines in the editor
   globals.highlightedLines.clear();
 
+  // Clean up resources used by the Python handler
   pythonHandlerDeactivate();
 
+  // Clean up resources used by the Jupyter handler
   jupyterHandlerDeactivate();
 
   // Log a message indicating that the extension has been deactivated
   console.log("Antileak-ML extension has been deactivated.");
 
-  // Reload the window to ensure all decorations are removed
+  // Reload the VS Code window to ensure all decorations and changes are removed
   vscode.commands.executeCommand("workbench.action.reloadWindow");
 }
