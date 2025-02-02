@@ -10,22 +10,28 @@ import {
   isThemeLight,
 } from "./globals";
 
+// Map to store decorations for each file URI
 const decorationMap = new Map<string, StoredDecoration[]>();
+
+// Define a decoration type for highlighting lines
 const highlightDecorationType = getOrCreateDecorationType({
   backgroundColor: isThemeLight()
     ? "rgba(173, 216, 230, 0.3)"
     : "rgba(135, 206, 250, 0.3)",
 });
 
+// Function to handle Python file analysis
 export async function handlePythonFile(context: vscode.ExtensionContext) {
+  // Create a diagnostic collection for Docker-related issues
   const collection = vscode.languages.createDiagnosticCollection("docker");
 
+  // Check if there is an active text editor
   if (vscode.window.activeTextEditor) {
     let document = vscode.window.activeTextEditor.document;
     if (document && document.languageId === "python") {
-      // Show a confirmation dialog
+      // Show a confirmation dialog to the user
       const confirmAnalysis = await vscode.window.showInformationMessage(
-        "Do you want to analyze your code for leakage ?",
+        "Do you want to analyze your code for leakage?",
         { modal: true },
         "Yes"
       );
@@ -38,14 +44,14 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
-  // Listen for visible text editors (including notebook cells)
+  // Listen for changes in visible text editors (including notebook cells)
   context.subscriptions.push(
     vscode.window.onDidChangeVisibleTextEditors((visibleEditors) => {
       for (const textEditor of visibleEditors) {
         const cellUri = textEditor.document.uri.toString();
         const decorations = decorationMap.get(cellUri) || [];
 
-        // Reapply ALL stored decorations for this text editor
+        // Reapply all stored decorations for this text editor
         decorations.forEach(({ range, decorationType }) => {
           textEditor.setDecorations(decorationType, [range]);
         });
@@ -53,48 +59,60 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     })
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "antileak-ml.highlightLine",
-      (line1: number, line2: number) => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-          return;
-        }
+  // Check if the "highlightLine" command already exists
+  const commandExists = vscode.commands.getCommands(true).then((commands) => {
+    return commands.includes("antileak-ml.highlightLine");
+  });
 
-        const range1 = new vscode.Range(
-          new vscode.Position(line1 - 1, 0),
-          new vscode.Position(line1 - 1, Number.MAX_SAFE_INTEGER)
-        );
+  commandExists.then((exists) => {
+    if (!exists) {
+      // Register the "highlightLine" command if it doesn't exist
+      context.subscriptions.push(
+        vscode.commands.registerCommand(
+          "antileak-ml.highlightLine",
+          (line1: number, line2: number) => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+              return;
+            }
 
-        const range2 = new vscode.Range(
-          new vscode.Position(line2 - 1, 0),
-          new vscode.Position(line2 - 1, Number.MAX_SAFE_INTEGER)
-        );
+            // Define ranges for the lines to highlight
+            const range1 = new vscode.Range(
+              new vscode.Position(line1 - 1, 0),
+              new vscode.Position(line1 - 1, Number.MAX_SAFE_INTEGER)
+            );
 
-        // Clés pour identifier les lignes
-        const key1 = `${line1}:${editor.document.uri.toString()}`;
-        const key2 = `${line2}:${editor.document.uri.toString()}`;
+            const range2 = new vscode.Range(
+              new vscode.Position(line2 - 1, 0),
+              new vscode.Position(line2 - 1, Number.MAX_SAFE_INTEGER)
+            );
 
-        // Vérifie si les lignes sont déjà surlignées
-        if (
-          globals.highlightedLines.has(key1) &&
-          globals.highlightedLines.has(key2)
-        ) {
-          // Si les lignes sont déjà surlignées, retirer le surlignage
-          globals.highlightedLines.delete(key1);
-          globals.highlightedLines.delete(key2);
-          editor.setDecorations(highlightDecorationType, []);
-        } else {
-          // Sinon, appliquer le surlignage
-          globals.highlightedLines.add(key1);
-          globals.highlightedLines.add(key2);
-          editor.setDecorations(highlightDecorationType, [range1, range2]);
-        }
-      }
-    )
-  );
+            // Create unique keys for the highlighted lines
+            const key1 = `${line1}:${editor.document.uri.toString()}`;
+            const key2 = `${line2}:${editor.document.uri.toString()}`;
 
+            // Check if the lines are already highlighted
+            if (
+              globals.highlightedLines.has(key1) &&
+              globals.highlightedLines.has(key2)
+            ) {
+              // Remove highlighting if already applied
+              globals.highlightedLines.delete(key1);
+              globals.highlightedLines.delete(key2);
+              editor.setDecorations(highlightDecorationType, []);
+            } else {
+              // Apply highlighting if not already applied
+              globals.highlightedLines.add(key1);
+              globals.highlightedLines.add(key2);
+              editor.setDecorations(highlightDecorationType, [range1, range2]);
+            }
+          }
+        )
+      );
+    }
+  });
+
+  // Function to run a Docker container for analysis
   async function runDockerContainer(
     filePath: string,
     collection: vscode.DiagnosticCollection
@@ -148,9 +166,10 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         console.error(`Failed to remove container: ${removeErrorMessage}`);
       }
 
-      parseHtmlForDiagnostics(htmlOutputPath, filePath, collection);
+      // Parse the HTML output for diagnostics
+      parseHtmlOutput(htmlOutputPath, filePath, collection);
 
-      // Call cleanup to remove the HTML output file
+      // Clean up the generated HTML file
       cleanup(htmlOutputPath);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -168,7 +187,8 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
-  function parseHtmlForDiagnostics(
+  // Function to parse the HTML output to generate diagnostics and decorations
+  function parseHtmlOutput(
     htmlPath: string,
     filePath: string,
     collection: vscode.DiagnosticCollection
@@ -178,13 +198,14 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
 
     const diagnostics: vscode.Diagnostic[] = [];
 
-    // Appelle parseSumTable pour analyser la table .sum
+    // Parse the sum table from the HTML output
     parseSumTable($, diagnostics);
-    // Recherche la table de classe "sum"
+
+    // Find the sum table in the HTML
     const sumTable = $("table.sum").html();
 
     if (sumTable) {
-      // Générer le code HTML pour l'inclure dans le WebView
+      // Generate HTML content for the WebView
       const fullHtmlContent = `
           <html>
             <body>
@@ -196,48 +217,48 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
           </html>
         `;
 
-      // Parcours de tous les boutons
+      // Iterate over all buttons in the HTML
       $("button").each((index, element) => {
-        const buttonText = $(element).text().trim(); // Texte du bouton
-        const onclickValue = $(element).attr("onclick"); // Valeur de l'attribut onclick
+        const buttonText = $(element).text().trim(); // Button text
+        const onclickValue = $(element).attr("onclick"); // Onclick attribute value
 
-        // Cherche le span avec un attribut id qui contient le numéro de ligne
+        // Find the span with the line number
         const lineNumberSpan = $(element).prevAll("span[id]").first();
         const lineNumber = parseInt(lineNumberSpan.attr("id") || "0", 10);
 
-        // Si un numéro de ligne valide est trouvé
+        // If a valid line number is found
         if (lineNumber > 0) {
           const range = new vscode.Range(
-            new vscode.Position(lineNumber - 1, 0), // Convertit le numéro de ligne en position 0-based
-            new vscode.Position(lineNumber - 1, 100) // Largeur arbitraire pour l'intervalle
+            new vscode.Position(lineNumber - 1, 0), // Convert to 0-based position
+            new vscode.Position(lineNumber - 1, 100) // Arbitrary width for the range
           );
 
-          // Vérifie la couleur de fond du bouton
+          // Check the button's background color
           const backgroundColor = $(element).css("background-color");
 
-          // Appelle les fonctions de détection
+          // Call detection functions
           detectLeakage(buttonText, backgroundColor, range, diagnostics);
           highlightTrainTestSites(buttonText, onclickValue, range, diagnostics);
         }
       });
 
-      // Ajoute les diagnostics à la collection
+      // Add the diagnostics to the collection
       const fileUri = vscode.Uri.file(filePath);
       collection.set(fileUri, diagnostics);
 
-      // Define a key for the global boolean variable
-      const SHOW_RESULTS_TABLE_KEY = "antileak-ml.showResultsTable";
+      // Retrieve the boolean value from global state
+      let showResultsTable = context.globalState.get(
+        "antileak-ml.showResultsTable"
+      );
 
-      // Retrieve the boolean value from global state (default to false if not set)
-      let showResultsTable = context.globalState.get(SHOW_RESULTS_TABLE_KEY);
-
-      // Afficher la table dans un WebView
+      // Show the table in a WebView if the setting is enabled
       if (showResultsTable) {
         showHtmlInWebView(fullHtmlContent);
       }
     }
   }
 
+  // Function to detect leakage based on button text and background color
   function detectLeakage(
     buttonText: string,
     backgroundColor: string | undefined,
@@ -245,26 +266,29 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     diagnostics: vscode.Diagnostic[]
   ) {
     if (backgroundColor === "red") {
-      const diagnosticSeverity = vscode.DiagnosticSeverity.Error;
+      const diagnosticSeverity = vscode.DiagnosticSeverity.Error; // Severity level for errors
       const diagnosticMessage = buttonText;
 
+      // Define decoration properties
       const decorationProperties: vscode.DecorationRenderOptions = {
         after: {
-          contentText: buttonText,
-          backgroundColor: "red",
-          color: "white",
-          margin: "0 10px 0 10px",
+          contentText: buttonText, // Button text
+          backgroundColor: "red", // Red background
+          color: "white", // White text
+          margin: "0 10px 0 10px", // Spacing
         },
-        borderRadius: "5px",
-        cursor: "pointer",
+        borderRadius: "5px", // Rounded corners
+        cursor: "pointer", // Pointer cursor
       };
 
+      // Get or create the decoration type
       const decorationType = getOrCreateDecorationType(decorationProperties);
       const editor = vscode.window.activeTextEditor;
       if (editor) {
         applyDecorationToFile(editor.document.uri, range, decorationType);
       }
 
+      // Add the diagnostic
       const diagnostic = new vscode.Diagnostic(
         range,
         diagnosticMessage,
@@ -274,6 +298,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to highlight train/test sites based on button text and onclick value
   function highlightTrainTestSites(
     buttonText: string,
     onclickValue: string | undefined,
@@ -281,6 +306,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     diagnostics: vscode.Diagnostic[]
   ) {
     if (buttonText === "train" || buttonText === "test") {
+      // Add an informative diagnostic
       const diagnosticMessage = `${buttonText} data`;
       const diagnostic = new vscode.Diagnostic(
         range,
@@ -295,6 +321,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       if (match) {
         const [_, line1, line2] = match.map(Number);
 
+        // Define decoration properties
         const decorationProperties: vscode.DecorationRenderOptions = {
           after: {
             contentText: "highlight train/test sites",
@@ -307,12 +334,14 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
           cursor: "pointer",
         };
 
+        // Get or create the decoration type
         const decorationType = getOrCreateDecorationType(decorationProperties);
         const editor = vscode.window.activeTextEditor;
         if (editor) {
           applyDecorationToFile(editor.document.uri, range, decorationType);
         }
 
+        // Register a hover provider for the highlighted lines
         vscode.languages.registerHoverProvider("*", {
           provideHover(document, position) {
             if (range.contains(position) && document === editor?.document) {
@@ -330,6 +359,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to parse the sum table for diagnostics
   function parseSumTable(
     $: cheerio.CheerioAPI,
     diagnostics: vscode.Diagnostic[]
@@ -339,7 +369,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     tableRows.each((index, row) => {
       const cells = $(row).find("td");
 
-      // Skip the header row (index 0)
+      // Skip the header row
       if (index === 0) {
         return;
       }
@@ -348,18 +378,18 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
       const detectedCount = $(cells[1]).text().trim();
       const locations = $(cells[2]).text().trim();
 
-      // Créer un message de diagnostic
+      // Create a diagnostic message
       const diagnosticMessage = `Leakage: ${leakageType}, Detected: ${detectedCount}, Locations: ${locations}`;
 
       vscode.window.showInformationMessage(diagnosticMessage);
 
-      // Définir la ligne de diagnostic
+      // Define the range for the diagnostic
       const range = new vscode.Range(
         new vscode.Position(index - 1, 0),
         new vscode.Position(index - 1, 100)
       );
 
-      // Ajouter un diagnostic d'information
+      // Add an informational diagnostic
       const diagnostic = new vscode.Diagnostic(
         range,
         diagnosticMessage,
@@ -370,21 +400,23 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     });
   }
 
+  // Function to show HTML content in a WebView
   function showHtmlInWebView(htmlContent: string) {
-    // Créer un panel de WebView
+    // Create a WebView panel
     const panel = vscode.window.createWebviewPanel(
-      "LeakageReport", // Identifiant unique pour le WebView
-      "Leakage Report", // Titre du panneau
-      vscode.ViewColumn.Two, // Position du WebView (dans la deuxième colonne de l'éditeur)
+      "LeakageReport", // Unique identifier for the WebView
+      "Leakage Report", // Panel title
+      vscode.ViewColumn.Two, // Position in the editor
       {
-        enableScripts: true, // Permet l'utilisation de scripts dans le WebView (facultatif)
+        enableScripts: true, // Allow scripts in the WebView
       }
     );
 
-    // Injecter le contenu HTML dans le WebView
+    // Inject the HTML content into the WebView
     panel.webview.html = htmlContent;
   }
 
+  // Function to update diagnostics
   function updateDiagnostics(
     document: vscode.TextDocument | null,
     collection: vscode.DiagnosticCollection
@@ -397,22 +429,18 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
-  // Fonction pour créer un type de décoration basé sur le thème actuel
-  function isThemeLight(): boolean {
-    return vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
-  }
-
+  // Function to clean up generated files and directories
   function cleanup(filePath: string) {
     const dirPath = path.dirname(filePath);
 
     try {
-      // Supprimer le fichier HTML
+      // Delete the HTML file
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         console.log(`File ${filePath} has been deleted.`);
       }
 
-      // Supprimer les dossiers finissant par -fact
+      // Delete directories ending with "-fact"
       const factDirs = fs
         .readdirSync(dirPath)
         .filter(
@@ -424,7 +452,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         deleteFolderRecursive(path.join(dirPath, dir));
       }
 
-      // Supprimer les dossiers finissant par ip-fact
+      // Delete directories ending with "ip-fact"
       const ipFactDirs = fs
         .readdirSync(dirPath)
         .filter(
@@ -436,7 +464,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         deleteFolderRecursive(path.join(dirPath, dir));
       }
 
-      // Supprimer les fichiers finissant par .ir.py
+      // Delete files ending with ".ir.py"
       const irPyFiles = fs
         .readdirSync(dirPath)
         .filter((item) => item.endsWith(".ir.py"));
@@ -445,7 +473,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         console.log(`File ${file} has been deleted.`);
       }
 
-      // Supprimer les fichiers finissant par .py.json
+      // Delete files ending with ".py.json"
       const pyJsonFiles = fs
         .readdirSync(dirPath)
         .filter((item) => item.endsWith(".py.json"));
@@ -454,7 +482,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         console.log(`File ${file} has been deleted.`);
       }
 
-      // Supprimer les fichiers finissant par .ipynb.json
+      // Delete files ending with ".ipynb.json"
       const ipynbJsonFiles = fs
         .readdirSync(dirPath)
         .filter((item) => item.endsWith(".ipynb.json"));
@@ -468,16 +496,16 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
-  // Fonction récursive pour supprimer un dossier et son contenu
+  // Recursive function to delete a folder and its contents
   function deleteFolderRecursive(folderPath: string) {
     if (fs.existsSync(folderPath)) {
       fs.readdirSync(folderPath).forEach((file) => {
         const curPath = path.join(folderPath, file);
         if (fs.lstatSync(curPath).isDirectory()) {
-          // Récursement pour les sous-dossiers
+          // Recursively delete subdirectories
           deleteFolderRecursive(curPath);
         } else {
-          // Supprimer les fichiers
+          // Delete files
           fs.unlinkSync(curPath);
         }
       });
@@ -486,6 +514,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     }
   }
 
+  // Function to apply decorations to a file
   function applyDecorationToFile(
     fileUri: vscode.Uri,
     range: vscode.Range,
@@ -494,24 +523,30 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
     const uriString = fileUri.toString();
     let fileDecorations = decorationMap.get(uriString) || [];
 
+    // Check if this exact decoration (same type and range) already exists
     const existingDecorationIndex = fileDecorations.findIndex(
       (d) =>
         d.range.isEqual(range) && d.decorationType.key === decorationType.key
     );
 
     if (existingDecorationIndex === -1) {
+      // Add new decoration to the array
       fileDecorations.push({ range, decorationType });
     } else {
+      // Update existing decoration
       fileDecorations[existingDecorationIndex] = { range, decorationType };
     }
 
+    // Update the map
     decorationMap.set(uriString, fileDecorations);
 
+    // Find the visible editor for this file
     const visibleEditor = vscode.window.visibleTextEditors.find(
       (editor) => editor.document.uri.toString() === uriString
     );
 
     if (visibleEditor) {
+      // Group decorations by type
       const decorationsByType = new Map<
         vscode.TextEditorDecorationType,
         vscode.Range[]
@@ -523,6 +558,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
         decorationsByType.set(decoration.decorationType, ranges);
       });
 
+      // Apply each decoration type with all its ranges
       decorationsByType.forEach((ranges, decType) => {
         visibleEditor.setDecorations(decType, ranges);
       });
@@ -530,6 +566,7 @@ export async function handlePythonFile(context: vscode.ExtensionContext) {
   }
 }
 
+// Function to deactivate the Python handler
 export function pythonHandlerDeactivate() {
   // Clean up decorations
   for (const decorations of decorationMap.values()) {
@@ -548,6 +585,6 @@ export function pythonHandlerDeactivate() {
   // Clear highlighted lines
   globals.highlightedLines.clear();
 
-  // Optionally, log a message indicating that the Python handler has been deactivated
+  // Log a message indicating that the Python handler has been deactivated
   console.log("Python handler has been deactivated.");
 }

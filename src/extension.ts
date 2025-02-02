@@ -4,6 +4,7 @@ import { handleJupyterFile, jupyterHandlerDeactivate } from "./jupyterHandler";
 import { globals } from "./globals";
 
 export async function activate(context: vscode.ExtensionContext) {
+  // Create a diagnostic collection for Docker-related issues
   const collection = vscode.languages.createDiagnosticCollection("docker");
 
   // Déclarer les commandes
@@ -107,6 +108,7 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Listen for notebook save events and trigger analysis based on the file type
   context.subscriptions.push(
     vscode.workspace.onDidSaveNotebookDocument(async (document) => {
       if (document && document.uri.path.endsWith("py")) {
