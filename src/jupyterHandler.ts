@@ -600,28 +600,70 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     }
   }
 
-  // Function to run a Docker container for analysis
-  async function runDockerContainer(
+  // Function to pull the custom Docker image
+  async function pullDockerImage(
     filePath: string,
     collection: vscode.DiagnosticCollection
   ) {
     const docker = new Docker();
-    const inputDir = path.dirname(filePath);
     const fileName = path.basename(filePath);
     const imageName = "nat2194/leakage-analysis:1.0";
+
+    vscode.window.showInformationMessage(`Running analysis on ${fileName}`);
+
+    try {
+      // Tenter de tirer l'image Docker
+      await docker.pull(imageName, (err: any, stream: any) => {
+        if (err) {
+          vscode.window.showErrorMessage(
+            `Failed to pull Docker image: ${err.message}`
+          );
+          return;
+        }
+
+        // Attendre que l'image soit complètement tirée
+        docker.modem.followProgress(stream, onFinished, onProgress);
+
+        function onFinished(err: any, output: any) {
+          if (err) {
+            vscode.window.showErrorMessage(
+              `Failed to pull Docker image: ${err.message}`
+            );
+            return;
+          }
+          vscode.window.showInformationMessage(
+            `Docker image ${imageName} pulled successfully.`
+          );
+
+          // Une fois l'image tirée, vous pouvez lancer le conteneur
+          runContainer(docker, imageName, fileName, filePath);
+        }
+
+        function onProgress(event: any) {
+          console.log(event);
+        }
+      });
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Error: ${err.message}`);
+    }
+  }
+
+  // Function to run a Docker container for analysis
+  async function runContainer(
+    docker: Docker,
+    imageName: string,
+    fileName: string,
+    filePath: string
+  ) {
     const extension = path.extname(filePath);
     const newExtension = ".html";
+    const inputDir = path.dirname(filePath);
 
     const htmlOutputPath = path.join(
       inputDir,
       path.basename(filePath, extension) + newExtension
     );
-
-    vscode.window.showInformationMessage(`Running analysis on ${fileName}`);
-
     try {
-      await docker.pull(imageName);
-
       const container = await docker.createContainer({
         Image: imageName,
         Cmd: [`/app/leakage-analysis/test/${fileName}`, "-o"],
@@ -737,7 +779,7 @@ export async function handleJupyterFile(context: vscode.ExtensionContext) {
     collection.clear();
     if (vscode.window.activeNotebookEditor) {
       // Run the Docker container for analysis
-      runDockerContainer(
+      pullDockerImage(
         vscode.window.activeNotebookEditor.notebook.uri.fsPath,
         collection
       );
