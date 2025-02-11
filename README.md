@@ -24,6 +24,21 @@ The team is composed of :
 
 ---
 
+## Theoretical Concept
+
+There are 3 kinds of leakages that our extension is able to detect:
+
+- ### Preprocessing Leakage:
+  When training data and test data are preprocessed (transformed) together, test data sometimes influences the transformations of the training data
+  
+- ### Overlap Leakage:
+  A type of data leakage in machine learning that occurs when training and test sets share similar or identical data. This distorts the model's evaluation, as it has already seen samples from the test set during training, leading to an overestimation of its performance
+  
+- ### Multitest Leakage:
+  A type of data leakage that occurs when the same test set is used several times to evaluate a model, distorting the real evaluation of its performance
+
+---
+
 ## Requirements
 
 Before using the **Antileak-ML** extension, ensure you have the following installed:
